@@ -1,0 +1,7 @@
+# Directorio de datos (gigabytes que no se suben)
+datasets/
+
+# Archivos del modelo
+*.h5
+*.pth
+*.ckpt
