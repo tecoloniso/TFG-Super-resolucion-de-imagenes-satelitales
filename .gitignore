@@ -1,7 +1,13 @@
-# Directorio de datos (gigabytes que no se suben)
+# Ignorar todos los datasets
 datasets/
 
-# Archivos del modelo
-*.h5
-*.pth
-*.ckpt
+# Ignorar los entornos de Python
+/tfg_swinir/
+__pycache__/
+
+# Ignorar los resultados de experimentos de KAIR
+KAIR/experiments/
+KAIR/results/
+
+# Ignora los archivos .lmdb que crearemos
+*.lmdb
