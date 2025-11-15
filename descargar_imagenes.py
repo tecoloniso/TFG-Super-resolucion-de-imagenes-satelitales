@@ -7,149 +7,151 @@ from shapely.geometry import shape
 import os
 from tqdm import tqdm
 
-# --- CONFIGURACIÓN ---
-CREDENTIALS_FILE = 'datasets/credentials.txt'
-copernicus_user, copernicus_password = load_credentials(CREDENTIALS_FILE)
-if not copernicus_user or not copernicus_password:
-    exit()
-
-output_dir = 'datasets/Sentinel_Raw/'
-BBOX_X = [-1.830597,42.719777,-1.483154,42.888040]
-ft = f'POLYGON(({BBOX_X[0]} {BBOX_X[1]}, {BBOX_X[2]} {BBOX_X[1]}, {BBOX_X[2]} {BBOX_X[3]}, {BBOX_X[0]} {BBOX_X[3]}, {BBOX_X[0]} {BBOX_X[1]}))'
-data_collection = "SENTINEL-2"
-
-today =  date.today()
-today_string = today.strftime("%Y-%m-%d")
-yesterday = today - timedelta(days=100)
-yesterday_string = yesterday.strftime("%Y-%m-%d")
-
-MAX_CLOUD_COVER = 20  # Límite máximo de nubes (ej. 20%)
-MAX_DOWNLOADS = 1     # Número MÁXIMO de imágenes a descargar
-# -------------------------------------
 
 # carga las credenciales desde local, para no leakear mis credenciales :)
-def load_credentials(filepath):
-    if not os.path.exists(filepath):
+def cargar_credenciales(ruta_archivo):
+    if not os.path.exists(ruta_archivo):
         print(f"Error fatal: El archivo de credenciales no se encuentra.")
-        print(f"Por favor, crea el archivo en: {filepath}")
+        print(f"Crea el archivo en: {ruta_archivo}")
         print("Con el formato:\nUSER=tu_usuario\nPASSWORD=tu_contraseña")
         return None, None
-    creds = {}
-    with open(filepath, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'): continue
+    credenciales = {}
+    with open(ruta_archivo, 'r') as f:
+        for linea in f:
+            linea = linea.strip()
+            if not linea or linea.startswith('#'): continue
             try:
-                key, value = line.split('=', 1)
-                creds[key.strip()] = value.strip()
+                clave, valor = linea.split('=', 1)
+                credenciales[clave.strip()] = valor.strip()
             except ValueError:
                 pass
-    user = creds.get('USER')
-    password = creds.get('PASSWORD')
-    if not user or not password:
-        print(f"Error: 'USER' o 'PASSWORD' no se encontraron en {filepath}")
+    usuario = credenciales.get('USER')
+    clave = credenciales.get('PASSWORD')
+    if not usuario or not clave:
+        print(f"Error: 'USER' o 'PASSWORD' no se encontraron en {ruta_archivo}")
         return None, None
     print("Credenciales cargadas exitosamente desde el archivo.")
-    return user, password
+    return usuario, clave
 
 #token de inicio de sesion
-def get_keycloak(username: str, password: str) -> str:
-    data = {"client_id": "cdse-public", "username": username, "password": password, "grant_type": "password"}
+def obtener_token_keycloak(usuario: str, clave: str) -> str:
+    datos = {"client_id": "cdse-public", "username": usuario, "password": clave, "grant_type": "password"}
     try:
-        r = requests.post("https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token", data=data)
-        r.raise_for_status()
+        respuesta = requests.post("https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token", data=datos)
+        respuesta.raise_for_status()
     except Exception as e:
-        raise Exception(f"Keycloak token creation failed. Reponse from the server was: {r.json()}")
-    return r.json()["access_token"]
+        raise Exception(f"Fallo al crear el token de Keycloak. La respuesta del servidor fue: {respuesta.json()}")
+    return respuesta.json()["access_token"]
+
+
+# --- CONFIGURACIÓN ---
+ARCHIVO_CREDENCIALES = 'datasets/credentials.txt'
+usuario_copernicus, clave_copernicus = cargar_credenciales(ARCHIVO_CREDENCIALES)
+if not usuario_copernicus or not clave_copernicus:
+    exit()
+
+directorio_salida = 'datasets/Sentinel_Raw/'
+BBOX_X = [-1.830597,42.719777,-1.483154,42.888040]
+huella_wkt = f'POLYGON(({BBOX_X[0]} {BBOX_X[1]}, {BBOX_X[2]} {BBOX_X[1]}, {BBOX_X[2]} {BBOX_X[3]}, {BBOX_X[0]} {BBOX_X[3]}, {BBOX_X[0]} {BBOX_X[1]}))'
+coleccion_datos = "SENTINEL-2"
+
+fecha_fin =  date.today()
+fecha_fin_texto = fecha_fin.strftime("%Y-%m-%d")
+fecha_inicio = fecha_fin - timedelta(days=100)
+fecha_inicio_texto = fecha_inicio.strftime("%Y-%m-%d")
+
+MAX_NUBES_PORCENTAJE = 20  # Limite maximo de nubes (ej. 20%)
+MAX_DESCARGAS = 1      # Número maximo de imágenes a descargar
+# -----------------------------------
 
 
 # Query con todos los filtros (buscara imagenes con estas caracteristicas)
-query_url = (
+url_consulta = (
     f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products?"
-    f"$filter=Collection/Name eq '{data_collection}'"
-    f" and OData.CSC.Intersects(area=geography'SRID=4326;{ft}')"
-    f" and ContentDate/Start gt {yesterday_string}T00:00:00.000Z"
-    f" and ContentDate/Start lt {today_string}T00:00:00.000Z"
-    f" and Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value lt {MAX_CLOUD_COVER})"
+    f"$filter=Collection/Name eq '{coleccion_datos}'"
+    f" and OData.CSC.Intersects(area=geography'SRID=4326;{huella_wkt}')"
+    f" and ContentDate/Start gt {fecha_inicio_texto}T00:00:00.000Z"
+    f" and ContentDate/Start lt {fecha_fin_texto}T00:00:00.000Z"
+    f" and Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value lt {MAX_NUBES_PORCENTAJE})"
     f"&$count=True&$top=1000"
 )
 
-json_ = requests.get(query_url).json()  
-p = pd.DataFrame.from_dict(json_["value"])
+respuesta_json = requests.get(url_consulta).json()  
+df_temporal = pd.DataFrame.from_dict(respuesta_json["value"])
 
-if p.shape[0] > 0 :
-    p["geometry"] = p["GeoFootprint"].apply(shape)
-    productDF = gpd.GeoDataFrame(p).set_geometry("geometry")
-    productDF = productDF[~productDF["Name"].str.contains("L1C")]
+if df_temporal.shape[0] > 0 :
+    df_temporal["geometry"] = df_temporal["GeoFootprint"].apply(shape)
+    df_productos = gpd.GeoDataFrame(df_temporal).set_geometry("geometry")
+    df_productos = df_productos[~df_productos["Name"].str.contains("L1C")]
     
     # Ordenar por fecha (mas reciente primero)
-    productDF['ContentDate'] = pd.to_datetime(productDF['ContentDate'].apply(lambda x: x['Start']))
-    productDF = productDF.sort_values(by='ContentDate', ascending=False)
+    df_productos['ContentDate'] = pd.to_datetime(df_productos['ContentDate'].apply(lambda x: x['Start']))
+    df_productos = df_productos.sort_values(by='ContentDate', ascending=False)
     
-    total_found = len(productDF)
-    print(f"Total L2A tiles encontrados que cumplen los criterios: {total_found}")
+    total_encontrados = len(df_productos)
+    print(f"Total L2A tiles encontrados que cumplen los criterios: {total_encontrados}")
     
     # Descargar un maximo de imagenes
-    if total_found > MAX_DOWNLOADS:
-        print(f"Limitando la descarga a las {MAX_DOWNLOADS} imágenes más recientes.")
-        productDF = productDF.head(MAX_DOWNLOADS)
+    if total_encontrados > MAX_DESCARGAS:
+        print(f"Limitando la descarga a las {MAX_DESCARGAS} imágenes más recientes.")
+        df_productos = df_productos.head(MAX_DESCARGAS)
     
-    allfeat = len(productDF) 
+    total_a_descargar = len(df_productos) 
 
-    if allfeat == 0:
-        print("No tiles found")
+    if total_a_descargar == 0:
+        print("No se encontraron 'tiles' que cumplan los filtros")
     else:
-        ## download all tiles from server
-        print(f"--- Iniciando descarga de {allfeat} productos ---")
+        # Descargar las imagenes
+        print(f"--- Iniciando descarga de {total_a_descargar} productos ---")
         
-        for index,feat in enumerate(productDF.iterfeatures()):
+        for indice, producto in enumerate(df_productos.iterfeatures()):
             
-            product_id = feat['properties']['Id']
-            product_name = feat['properties']['Name']
-            product_identifier = product_name.replace(".SAFE", "")
-            output_filename = f"{product_identifier}.zip"
-            output_path = os.path.join(output_dir, output_filename)
+            id_producto = producto['properties']['Id']
+            nombre_producto = producto['properties']['Name']
+            identificador_producto = nombre_producto.replace(".SAFE", "")
+            nombre_archivo_salida = f"{identificador_producto}.zip"
+            ruta_salida = os.path.join(directorio_salida, nombre_archivo_salida)
             
             try:
                 # Crear sesión y obtener token
-                session = requests.Session()
-                keycloak_token = get_keycloak(copernicus_user, copernicus_password)
-                session.headers.update({"Authorization": f"Bearer {keycloak_token}"})
+                sesion = requests.Session()
+                token_keycloak = obtener_token_keycloak(usuario_copernicus, clave_copernicus)
+                sesion.headers.update({"Authorization": f"Bearer {token_keycloak}"})
                 
-                url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({product_id})/$value"
-                response = session.get(url, allow_redirects=False, timeout=30)
-                while response.status_code in (301, 302, 303, 307):
-                    url = response.headers["Location"]
-                    response = session.get(url, allow_redirects=False, timeout=30)
-                print(f"Descargando: {product_name} ({index+1}/{allfeat})")
+                url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({id_producto})/$value"
+                respuesta = sesion.get(url, allow_redirects=False, timeout=30)
+                while respuesta.status_code in (301, 302, 303, 307):
+                    url = respuesta.headers["Location"]
+                    respuesta = sesion.get(url, allow_redirects=False, timeout=30)
+                print(f"Descargando: {nombre_producto} ({indice+1}/{total_a_descargar})")
                 
                 # descargar el archivo EN STREAMING
-                with session.get(url, verify=True, allow_redirects=True, stream=True, timeout=30) as file_response:
-                    file_response.raise_for_status() 
+                with sesion.get(url, verify=True, allow_redirects=True, stream=True, timeout=30) as respuesta_archivo:
+                    respuesta_archivo.raise_for_status() 
                     
-                    total_size_in_bytes = int(file_response.headers.get('content-length', 0))
-                    block_size = 1024 * 8 
+                    tamano_total_bytes = int(respuesta_archivo.headers.get('content-length', 0))
+                    tamano_bloque = 1024 * 8 
                     
-                    progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True, desc=product_name)
+                    barra_progreso = tqdm(total=tamano_total_bytes, unit='iB', unit_scale=True, desc=nombre_producto)
                     
-                    with open(output_path, "wb") as f:
-                        for chunk in file_response.iter_content(chunk_size=block_size):
-                            progress_bar.update(len(chunk)) 
-                            f.write(chunk) 
+                    with open(ruta_salida, "wb") as f:
+                        for trozo in respuesta_archivo.iter_content(chunk_size=tamano_bloque):
+                            barra_progreso.update(len(trozo)) 
+                            f.write(trozo) 
                             
-                    progress_bar.close()
+                    barra_progreso.close()
 
-                if total_size_in_bytes != 0 and progress_bar.n != total_size_in_bytes:
+                if tamano_total_bytes != 0 and barra_progreso.n != tamano_total_bytes:
                     print("Error: La descarga podría estar incompleta.")
                 else:
-                    print(f"  > Descarga completada: {output_path}")
+                    print(f"   > Descarga completada: {ruta_salida}")
 
             except Exception as e:
-                print(f"\n¡Ha ocurrido un error descargando {product_name}!")
+                print(f"\n¡Ha ocurrido un error descargando {nombre_producto}!")
                 print(f"DETALLE DEL ERROR: {e}\n")
             
             
-        print(f"\n--- Proceso de descarga finalizado. Se han procesado {allfeat} productos. ---")
+        print(f"\n--- Proceso de descarga finalizado. Se han procesado {total_a_descargar} productos. ---")
 
 else :
     print('no data found')
