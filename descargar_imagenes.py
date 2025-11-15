@@ -60,7 +60,7 @@ fecha_fin_texto = fecha_fin.strftime("%Y-%m-%d")
 fecha_inicio = fecha_fin - timedelta(days=100)
 fecha_inicio_texto = fecha_inicio.strftime("%Y-%m-%d")
 
-MAX_NUBES_PORCENTAJE = 20  # Limite maximo de nubes (ej. 20%)
+MAX_NUBES_PORCENTAJE = 90  # Limite maximo de nubes (ej. 20%)
 MAX_DESCARGAS = 1      # Número maximo de imágenes a descargar
 # -----------------------------------
 
@@ -112,43 +112,46 @@ if df_temporal.shape[0] > 0 :
             nombre_archivo_salida = f"{identificador_producto}.zip"
             ruta_salida = os.path.join(directorio_salida, nombre_archivo_salida)
             
-            try:
-                # Crear sesión y obtener token
-                sesion = requests.Session()
-                token_keycloak = obtener_token_keycloak(usuario_copernicus, clave_copernicus)
-                sesion.headers.update({"Authorization": f"Bearer {token_keycloak}"})
-                
-                url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({id_producto})/$value"
-                respuesta = sesion.get(url, allow_redirects=False, timeout=30)
-                while respuesta.status_code in (301, 302, 303, 307):
-                    url = respuesta.headers["Location"]
+            if os.path.exists(ruta_salida):
+                print(f"El archivo ya existe, se omite la descarga: {nombre_archivo_salida}")
+            else:
+                try:
+                    # Crear sesión y obtener token
+                    sesion = requests.Session()
+                    token_keycloak = obtener_token_keycloak(usuario_copernicus, clave_copernicus)
+                    sesion.headers.update({"Authorization": f"Bearer {token_keycloak}"})
+                    
+                    url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({id_producto})/$value"
                     respuesta = sesion.get(url, allow_redirects=False, timeout=30)
-                print(f"Descargando: {nombre_producto} ({indice+1}/{total_a_descargar})")
-                
-                # descargar el archivo EN STREAMING
-                with sesion.get(url, verify=True, allow_redirects=True, stream=True, timeout=30) as respuesta_archivo:
-                    respuesta_archivo.raise_for_status() 
+                    while respuesta.status_code in (301, 302, 303, 307):
+                        url = respuesta.headers["Location"]
+                        respuesta = sesion.get(url, allow_redirects=False, timeout=30)
+                    print(f"Descargando: {nombre_producto} ({indice+1}/{total_a_descargar})")
                     
-                    tamano_total_bytes = int(respuesta_archivo.headers.get('content-length', 0))
-                    tamano_bloque = 1024 * 8 
-                    
-                    barra_progreso = tqdm(total=tamano_total_bytes, unit='iB', unit_scale=True, desc=nombre_producto)
-                    
-                    with open(ruta_salida, "wb") as f:
-                        for trozo in respuesta_archivo.iter_content(chunk_size=tamano_bloque):
-                            barra_progreso.update(len(trozo)) 
-                            f.write(trozo) 
-                            
-                    barra_progreso.close()
+                    # descargar el archivo EN STREAMING
+                    with sesion.get(url, verify=True, allow_redirects=True, stream=True, timeout=30) as respuesta_archivo:
+                        respuesta_archivo.raise_for_status() 
+                        
+                        tamano_total_bytes = int(respuesta_archivo.headers.get('content-length', 0))
+                        tamano_bloque = 1024 * 8 
+                        
+                        barra_progreso = tqdm(total=tamano_total_bytes, unit='iB', unit_scale=True, desc=nombre_producto)
+                        
+                        with open(ruta_salida, "wb") as f:
+                            for trozo in respuesta_archivo.iter_content(chunk_size=tamano_bloque):
+                                barra_progreso.update(len(trozo)) 
+                                f.write(trozo) 
+                                
+                        barra_progreso.close()
 
-                if tamano_total_bytes != 0 and barra_progreso.n != tamano_total_bytes:
-                    print("Error: La descarga podría estar incompleta.")
-                else:
-                    print(f"   > Descarga completada: {ruta_salida}")
+                    if tamano_total_bytes != 0 and barra_progreso.n != tamano_total_bytes:
+                        print("Error: La descarga podría estar incompleta.")
+                    else:
+                        print(f"   > Descarga completada: {ruta_salida}")
 
-            except Exception as e:
-                print(f"\n¡Ha ocurrido un error descargando {nombre_producto}!")
-                print(f"DETALLE DEL ERROR: {e}\n")
+                except Exception as e:
+                    print(f"\n¡Ha ocurrido un error descargando {nombre_producto}!")
+                    print(f"DETALLE DEL ERROR: {e}\n")
             
             
         print(f"\n--- Proceso de descarga finalizado. Se han procesado {total_a_descargar} productos. ---")
