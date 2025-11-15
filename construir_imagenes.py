@@ -16,19 +16,19 @@ LOW_PERCENTILE = 2
 HIGH_PERCENTILE = 98
 
 # Intento evitar instanciar muchas veces la imagen porque ocupa mucha memoria
-def normalizar_percentiles(imagen, low_p=2, high_p=98):
+def normalizar_percentiles(imagen, low_p, high_p):
     # NoData=0, lo ignoramos
     mask = imagen > 0
-    if not mask.any():
-        print("POSIBLE ERROR: La imagen no tiene píxeles válidos (todos son 0).")
-        return np.zeros_like(imagen, dtype=np.uint8) # Imagen vacia
+    # if not mask.any():
+    #     print("POSIBLE ERROR: La imagen no tiene píxeles válidos (todos son 0).")
+    #     return np.zeros_like(imagen, dtype=np.uint8) # Imagen vacia
 
-    p_low, p_high = np.percentile(imagen[mask], (low_p, high_p))
+    # p_low, p_high = np.percentile(imagen[mask], (low_p, high_p))
     
     # Eliminar valores fuera de los percentiles
-    normalizado = np.clip(imagen[mask], p_low, p_high)
+    normalizado = np.clip(imagen[mask], low_p, high_p)
     # Normalizar a [0-255]
-    normalizado = (((normalizado - p_low) / (p_high - p_low)) * 255).astype(np.uint8)
+    normalizado = (((normalizado - low_p) / (high_p - low_p)) * 255).astype(np.uint8)
     salida = np.zeros_like(imagen, dtype=np.uint8)
     salida[mask] = normalizado
     return salida
@@ -79,15 +79,21 @@ def procesar_zip_a_png(ruta_zip, ruta_png_salida):
         
         print(f"  > Datos leídos. Dimensiones: {rojo.shape}")
 
+        masks = []
+        for imagen in [rojo, verde, azul]:
+            masks.append(imagen > 0)
+        rgb_apilados = np.concatenate([rojo[masks[0]], verde[masks[1]], azul[masks[2]]])
+        p_low, p_high = np.percentile(rgb_apilados, (LOW_PERCENTILE, HIGH_PERCENTILE))
+
         # Normalizar cada banda usando percentiles
-        rojo_norm = normalizar_percentiles(rojo)
-        verde_norm = normalizar_percentiles(verde)
-        azul_norm = normalizar_percentiles(azul)
+        rojo_norm = normalizar_percentiles(rojo, p_low, p_high)
+        verde_norm = normalizar_percentiles(verde, p_low, p_high)
+        azul_norm = normalizar_percentiles(azul, p_low, p_high)
         
         # Apilar las bandas en un array RGB
         rgb_stack = np.stack([rojo_norm, verde_norm, azul_norm], axis=-1)
         # Liberar las imagenes que no necesitamos mas
-        del rojo, verde, azul, rojo_norm, verde_norm, azul_norm 
+        del rojo, verde, azul, rojo_norm, verde_norm, azul_norm, masks, rgb_apilados
 
         print(f"  > Creando imagen RGB y guardando en: {ruta_png_salida}")
         img = Image.fromarray(rgb_stack, 'RGB')
