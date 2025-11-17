@@ -135,7 +135,7 @@ def procesar_zip_a_parches_lmdb(ruta_zip, txn_hr, txn_lr, indice_zip):
                 parche_lr = imagen_lr_np[y_lr : y_lr + TAMANO_PARCHE_LR, x_lr : x_lr + TAMANO_PARCHE_LR, :].copy()
                 
                 # Si mas del 70% de los pixeles en el parche son NoData, elimino el parche
-                if np.count(parche_hr == 0) > (0.7 * parche_hr.size())
+                if np.sum(parche_hr == 0) > (0.7 * parche_hr.size):
                     continue
                 
                 # Guardar en la BD
