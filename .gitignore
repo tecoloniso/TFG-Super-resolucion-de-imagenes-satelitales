@@ -1,9 +1,13 @@
 # Ignorar todos los datasets
 datasets/
 
-# KAIR/experiments/
-# las predicciones de las imagenes de val
-KAIR/superresolution/images/
+# Ignorar carpetas de experimentos y modelos pesados
+KAIR/superresolution/
+KAIR/model_zoo/
+KAIR/experiments/
+
+# Ignorar cualquier archivo de pesos por seguridad
+*.pth
 
 # Ignorar los entornos de Python
 /tfg_swinir/
