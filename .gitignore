@@ -1,13 +1,10 @@
 # Ignorar todos los datasets
 datasets/
 
+# KAIR/experiments/
+# las predicciones de las imagenes de val
+KAIR/superresolution/images/
+
 # Ignorar los entornos de Python
 /tfg_swinir/
 __pycache__/
-
-# Ignorar los resultados de experimentos de KAIR
-KAIR/experiments/
-KAIR/results/
-
-# Ignora los archivos .lmdb que crearemos
-*.lmdb

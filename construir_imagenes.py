@@ -19,11 +19,9 @@ HIGH_PERCENTILE = 98
 def normalizar_percentiles(imagen, low_p, high_p):
     # NoData=0, lo ignoramos
     mask = imagen > 0
-    # if not mask.any():
-    #     print("POSIBLE ERROR: La imagen no tiene píxeles válidos (todos son 0).")
-    #     return np.zeros_like(imagen, dtype=np.uint8) # Imagen vacia
-
-    # p_low, p_high = np.percentile(imagen[mask], (low_p, high_p))
+    if not mask.any():
+        print("POSIBLE ERROR: La imagen no tiene píxeles válidos (todos son 0).")
+        return np.zeros_like(imagen, dtype=np.uint8) # Imagen vacia
     
     # Eliminar valores fuera de los percentiles
     normalizado = np.clip(imagen[mask], low_p, high_p)
