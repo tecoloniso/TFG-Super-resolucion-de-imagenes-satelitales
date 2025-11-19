@@ -1,15 +1,16 @@
 {
-  "task": "SwinIR_TFG_PruebaReal", 
-  "model": "plain", 
-  "gpu_ids": [0],
+  "task": "SwinIR_TFG_Satelite_RealSR_x4",
+  "model": "plain",
   "dist": false,
-
+  "gpu_ids": [0],
   "scale": 4,
   "n_channels": 3,
 
   "path": {
     "root": "superresolution",
-    "pretrained_netG": "model_zoo/swinir/001_classicalSR_DF2K_s64w8_SwinIR-M_x4.pth",
+    "experiments_root": "experiments/SwinIR_TFG_Satelite_RealSR_x4",
+    
+    "pretrained_netG": "model_zoo/swinir/003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_PSNR.pth",
     "pretrained_netE": null
   },
 
@@ -19,11 +20,16 @@
       "dataset_type": "sr",
       "dataroot_H": "../datasets/Reg_X/train_HR",
       "dataroot_L": "../datasets/Reg_X/train_LR",
-      
       "H_size": 256,
       "dataloader_shuffle": true,
       "dataloader_num_workers": 4,
-      "dataloader_batch_size": 2
+      "dataloader_batch_size": 2  
+    },
+    "test": {
+      "name": "Reg_X_val",
+      "dataset_type": "sr",
+      "dataroot_H": "../datasets/Reg_X/val_HR",
+      "dataroot_L": "../datasets/Reg_X/val_LR"
     }
   },
 
@@ -31,37 +37,40 @@
     "net_type": "swinir", 
     "upscale": 4, 
     "in_chans": 3, 
-    "img_size": 64,
+    "img_size": 64, 
     "window_size": 8,
     "img_range": 1.0, 
     "depths": [6, 6, 6, 6, 6, 6], 
     "embed_dim": 180, 
-    "num_heads": [6, 6, 6, 6, 6, 6],
+    "num_heads": [6, 6, 6, 6, 6, 6], 
     "mlp_ratio": 2, 
-    "upsampler": "pixelshuffle",
-    "resi_connection": "1conv",
+    
+    "upsampler": "nearest+conv", 
+    
+    "resi_connection": "1conv", 
     "init_type": "default"
   },
 
   "train": {
-    "G_lossfn_type": "l1",
-    "G_lossfn_weight": 1.0,
+    "G_lossfn_type": "l1", 
+    "G_lossfn_weight": 1.0, 
     "E_decay": 0.999,
-
-    "G_optimizer_type": "adam",
-    "G_optimizer_lr": 1e-5,
-    "G_optimizer_wd": 0,
+    "G_optimizer_type": "adam", 
+    "G_optimizer_lr": 1e-5, 
+    "G_optimizer_wd": 0, 
     "G_optimizer_reuse": true,
-
+    
     "G_scheduler_type": "MultiStepLR",
-    "G_scheduler_milestones": [5, 8],
+    "G_scheduler_milestones": [500, 800],
     "G_scheduler_gamma": 0.5,
 
-    "G_param_strict": true,
+    "G_param_strict": true, 
     "E_param_strict": true,
 
-    "checkpoint_test": 11,
-    "checkpoint_save": 10,
-    "checkpoint_print": 1
+    "n_iter": 11,
+    
+    //"checkpoint_test": 11,  
+    "checkpoint_save": 10, 
+    "checkpoint_print": 1   
   }
 }

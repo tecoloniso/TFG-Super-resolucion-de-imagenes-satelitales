@@ -164,6 +164,16 @@ def parse(opt_path, is_train=True):
             opt['netD']['n_layers'] = 3
         if 'norm_type' not in opt['netD']:
             opt['netD']['norm_type'] = 'spectral'
+            
+    # Cosecha propia
+    if 'checkpoint_test' not in opt['train']:
+        opt['train']['checkpoint_test'] = None   # Si no existe, no testear
+    
+    if 'checkpoint_save' not in opt['train']:
+        opt['train']['checkpoint_save'] = 5000   # Guardar por defecto cada 5000
+        
+    if 'checkpoint_print' not in opt['train']:
+        opt['train']['checkpoint_print'] = 100   # Imprimir por defecto cada 100
 
 
     return opt

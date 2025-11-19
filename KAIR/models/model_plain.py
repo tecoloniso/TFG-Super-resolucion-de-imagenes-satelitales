@@ -52,12 +52,30 @@ class ModelPlain(ModelBase):
         load_path_G = self.opt['path']['pretrained_netG']
         if load_path_G is not None:
             print('Loading model for G [{:s}] ...'.format(load_path_G))
-            self.load_network(load_path_G, self.netG, strict=self.opt_train['G_param_strict'], param_key='params')
+            
+            import torch
+            checkpoint = torch.load(load_path_G)
+            if 'params_ema' in checkpoint:
+                my_param_key = 'params_ema'
+                print('   > Detectado modelo con clave: params_ema')
+            else:
+                my_param_key = 'params'
+                print('   > Detectado modelo con clave: params')
+
+            self.load_network(load_path_G, self.netG, strict=self.opt_train['G_param_strict'], param_key=my_param_key)
+
         load_path_E = self.opt['path']['pretrained_netE']
         if self.opt_train['E_decay'] > 0:
             if load_path_E is not None:
                 print('Loading model for E [{:s}] ...'.format(load_path_E))
-                self.load_network(load_path_E, self.netE, strict=self.opt_train['E_param_strict'], param_key='params_ema')
+                
+                checkpoint_E = torch.load(load_path_E)
+                if 'params_ema' in checkpoint_E:
+                    my_param_key_E = 'params_ema'
+                else:
+                    my_param_key_E = 'params'
+                
+                self.load_network(load_path_E, self.netE, strict=self.opt_train['E_param_strict'], param_key=my_param_key_E)
             else:
                 print('Copying model for E ...')
                 self.update_E(0)

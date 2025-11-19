@@ -209,45 +209,53 @@ def main(json_path='options/train_msrresnet_psnr.json'):
             # -------------------------------
             # 6) testing
             # -------------------------------
-            if current_step % opt['train']['checkpoint_test'] == 0 and opt['rank'] == 0:
+            # Solo entramos si checkpoint_test ESTÁ definido (no es None)
+            if opt['train']['checkpoint_test'] is not None and \
+               current_step % opt['train']['checkpoint_test'] == 0 and \
+               opt['rank'] == 0:
 
-                avg_psnr = 0.0
-                idx = 0
+                # Si toca testear pero no hay datos cargados ('test_loader' no existe)
+                if 'test_loader' not in locals():
+                    print(f"\n[Aviso] Iter {current_step}: Se solicitó test pero no hay dataset 'test'. Saltando validación.")
+                
+                else:
+                    avg_psnr = 0.0
+                    idx = 0
 
-                for test_data in test_loader:
-                    idx += 1
-                    image_name_ext = os.path.basename(test_data['L_path'][0])
-                    img_name, ext = os.path.splitext(image_name_ext)
+                    for test_data in test_loader:
+                        idx += 1
+                        image_name_ext = os.path.basename(test_data['L_path'][0])
+                        img_name, ext = os.path.splitext(image_name_ext)
 
-                    img_dir = os.path.join(opt['path']['images'], img_name)
-                    util.mkdir(img_dir)
+                        img_dir = os.path.join(opt['path']['images'], img_name)
+                        util.mkdir(img_dir)
 
-                    model.feed_data(test_data)
-                    model.test()
+                        model.feed_data(test_data)
+                        model.test()
 
-                    visuals = model.current_visuals()
-                    E_img = util.tensor2uint(visuals['E'])
-                    H_img = util.tensor2uint(visuals['H'])
+                        visuals = model.current_visuals()
+                        E_img = util.tensor2uint(visuals['E'])
+                        H_img = util.tensor2uint(visuals['H'])
 
-                    # -----------------------
-                    # save estimated image E
-                    # -----------------------
-                    save_img_path = os.path.join(img_dir, '{:s}_{:d}.png'.format(img_name, current_step))
-                    util.imsave(E_img, save_img_path)
+                        # -----------------------
+                        # save estimated image E
+                        # -----------------------
+                        save_img_path = os.path.join(img_dir, '{:s}_{:d}.png'.format(img_name, current_step))
+                        util.imsave(E_img, save_img_path)
 
-                    # -----------------------
-                    # calculate PSNR
-                    # -----------------------
-                    current_psnr = util.calculate_psnr(E_img, H_img, border=border)
+                        # -----------------------
+                        # calculate PSNR
+                        # -----------------------
+                        current_psnr = util.calculate_psnr(E_img, H_img, border=border)
 
-                    logger.info('{:->4d}--> {:>10s} | {:<4.2f}dB'.format(idx, image_name_ext, current_psnr))
+                        logger.info('{:->4d}--> {:>10s} | {:<4.2f}dB'.format(idx, image_name_ext, current_psnr))
 
-                    avg_psnr += current_psnr
+                        avg_psnr += current_psnr
 
-                avg_psnr = avg_psnr / idx
+                    avg_psnr = avg_psnr / idx
 
-                # testing log
-                logger.info('<epoch:{:3d}, iter:{:8,d}, Average PSNR : {:<.2f}dB\n'.format(epoch, current_step, avg_psnr))
+                    # testing log
+                    logger.info('<epoch:{:3d}, iter:{:8,d}, Average PSNR : {:<.2f}dB\n'.format(epoch, current_step, avg_psnr))
 
 if __name__ == '__main__':
     main()
