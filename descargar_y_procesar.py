@@ -1,6 +1,7 @@
 import io
 import os
 import shutil
+import random
 import tempfile
 import zipfile
 import requests
@@ -19,23 +20,30 @@ from tqdm import tqdm
 ARCHIVO_CREDENCIALES = 'datasets/credentials.txt'
 
 # Area de interes (BBOX)
-BBOX_X = [1.325226,42.421429,1.803131,42.676378]
+# http://bboxfinder.com/
+BBOX_X = [-2.636719,41.857288,-0.708618,43.333169]
 HUELLA_WKT = f'POLYGON(({BBOX_X[0]} {BBOX_X[1]}, {BBOX_X[2]} {BBOX_X[1]}, {BBOX_X[2]} {BBOX_X[3]}, {BBOX_X[0]} {BBOX_X[3]}, {BBOX_X[0]} {BBOX_X[1]}))'
 COLECCION = "SENTINEL-2"
 
 # Fechas
+DIAS = 2000 # x ultimos dias
 FECHA_FIN = date.today()
-FECHA_INICIO = FECHA_FIN - timedelta(days=200) # Últimos 100 días
+FECHA_INICIO = FECHA_FIN - timedelta(days=DIAS)
 
 # Filtros
-MAX_NUBES = 40      # Solo imagenes muy limpias
-MAX_IMAGENES = 1    # Cuantas imagenes procesar
+MAX_NUBES = 20      # % de nubes de las imagenes
+MAX_IMAGENES = 30    # Cuantas imagenes procesar
 
 # Carpetas donde guardar los parches
 CARPETA_SALIDA_HR = 'datasets/Reg_X/train_HR'
 CARPETA_SALIDA_LR = 'datasets/Reg_X/train_LR'
 
-# Configurar parches
+# Configuración Validación
+PORCENTAJE_VALIDACION = 0.2  # % de las imágenes irán a validación
+CARPETA_VAL_HR = 'datasets/Reg_X/val_HR'
+CARPETA_VAL_LR = 'datasets/Reg_X/val_LR'
+
+# Configurar parches (fijos)
 TAMANO_PARCHE_HR = 256
 TAMANO_PARCHE_LR = 64
 FACTOR_ESCALA = 4
@@ -44,7 +52,7 @@ INTERPOLACION_LR = cv2.INTER_CUBIC # Degradación bicúbica para el LR
 
 # Data Augmentation
 ROTACION_AUGMENTATION = True 
-ESCALAS_ZOOM = [1.0, 2.0, 4.0, 8.0, 16.0]
+ESCALAS_ZOOM = [1.0, 1.5, 2.0, 3, 4]
 
 # Normalización
 LOW_PERCENTILE = 2
@@ -88,7 +96,7 @@ def normalizar_percentiles(imagen, low_p, high_p):
 
 # Recibe el ZIP en memoria (BytesIO), extrae bandas, crea parches y los guarda
 def procesar_buffer_zip(buffer_zip, nombre_producto, contador_global):
-    print(f"   > Procesando en memoria: {nombre_producto}...")
+    print(f"   > Procesando: {nombre_producto}...")
     parches_guardados = 0
     
     # Usamos un directorio temporal para extraer SOLO las bandas necesarias
@@ -144,12 +152,12 @@ def procesar_buffer_zip(buffer_zip, nombre_producto, contador_global):
                 # Calculamos qué tamaño de trozo tenemos que cortar de la imagen original para que, al reducirlo, quede de 256x256
                 crop_size = int(TAMANO_PARCHE_HR * zoom)
                 
-                # Ajustamos el stride para que el solapamiento sea proporcional
-                stride = crop_size - int(SOLAPAMIENTO_HR * zoom)
-                if stride < 1: stride = 1
+                # Ajustamos el paso para que el solapamiento sea proporcional
+                paso = crop_size - int(SOLAPAMIENTO_HR * zoom)
+                if paso < 1: paso = 1
                 
-                for y in range(0, h_full - crop_size + 1, stride):
-                    for x in range(0, w_full - crop_size + 1, stride):
+                for y in range(0, h_full - crop_size + 1, paso):
+                    for x in range(0, w_full - crop_size + 1, paso):
                         
                         # Recortar sobre la imagen original
                         patch_src = img_hr_full[y:y+crop_size, x:x+crop_size, :].copy()
@@ -185,6 +193,59 @@ def procesar_buffer_zip(buffer_zip, nombre_producto, contador_global):
         except Exception as e:
             print(f"   > Error procesando zip: {e}")
             return contador_global * len(rots)
+
+
+def generar_split_validacion():
+    """
+    Mueve aleatoriamente un porcentaje de imágenes de train a val.
+    """
+    print(f"\n--- Generando set de validación ({PORCENTAJE_VALIDACION*100}%) ---")
+
+    # 1. Crear directorios de validación si no existen
+    os.makedirs(CARPETA_VAL_HR, exist_ok=True)
+    os.makedirs(CARPETA_VAL_LR, exist_ok=True)
+
+    # 2. Listar todas las imágenes generadas en HR
+    # (Asumimos que por cada HR existe su correspondiente LR con el mismo nombre)
+    archivos_train = [f for f in os.listdir(CARPETA_SALIDA_HR) if f.endswith('.png')]
+    total_imgs = len(archivos_train)
+
+    if total_imgs == 0:
+        print("   > No hay imágenes para mover.")
+        return
+
+    # 3. Calcular cuántas mover y seleccionarlas aleatoriamente
+    num_a_mover = int(total_imgs * PORCENTAJE_VALIDACION)
+    archivos_seleccionados = random.sample(archivos_train, num_a_mover)
+
+    print(f"   > Total generadas: {total_imgs}")
+    print(f"   > Moviendo {num_a_mover} imágenes a carpetas de validación...")
+
+    # 4. Mover archivos
+    movidos_count = 0
+    for nombre_archivo in tqdm(archivos_seleccionados, desc="Moviendo a Val"):
+        try:
+            # Rutas Origen
+            src_hr = os.path.join(CARPETA_SALIDA_HR, nombre_archivo)
+            src_lr = os.path.join(CARPETA_SALIDA_LR, nombre_archivo)
+
+            # Rutas Destino
+            dst_hr = os.path.join(CARPETA_VAL_HR, nombre_archivo)
+            dst_lr = os.path.join(CARPETA_VAL_LR, nombre_archivo)
+
+            # Mover HR
+            shutil.move(src_hr, dst_hr)
+
+            # Mover LR (Verificamos que exista para evitar errores)
+            if os.path.exists(src_lr):
+                shutil.move(src_lr, dst_lr)
+
+            movidos_count += 1
+
+        except Exception as e:
+            print(f"Error moviendo {nombre_archivo}: {e}")
+
+    print(f"   > ¡Hecho! {movidos_count} pares de imágenes movidos a validación.")
 
 
 if __name__ == "__main__":
@@ -264,3 +325,6 @@ if __name__ == "__main__":
 
     print(f"Total parches generados: {contador_global}")
     print(f"Guardados en: {CARPETA_SALIDA_HR}")
+
+    if contador_global > 0:
+        generar_split_validacion()
