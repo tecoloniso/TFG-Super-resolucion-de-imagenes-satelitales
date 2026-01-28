@@ -2,7 +2,7 @@ import cv2
 import argparse
 import os
 import numpy as np
-
+#
 def upscale_bicubico(ruta_entrada, ruta_salida, escala=4):
     
     if not os.path.exists(ruta_entrada):

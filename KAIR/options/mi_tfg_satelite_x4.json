@@ -22,8 +22,8 @@
       "dataroot_L": "../datasets/Reg_X/train_LR",
       "H_size": 256,
       "dataloader_shuffle": true,
-      "dataloader_num_workers": 4,
-      "dataloader_batch_size": 2  
+      "dataloader_num_workers": 8,
+      "dataloader_batch_size": 12
     },
     "test": {
       "name": "Reg_X_val",
@@ -67,7 +67,7 @@
     "G_param_strict": true, 
     "E_param_strict": true,
 
-    "n_iter": 11,
+    "n_iter": 15,
     
     //"checkpoint_test": 11,  
     "checkpoint_save": 10, 
