@@ -6,6 +6,10 @@ KAIR/superresolution/
 KAIR/model_zoo/
 KAIR/experiments/
 
+# Ignorar carpeta temporal
+temporal1/
+temporal/
+
 # Ignorar cualquier archivo de pesos por seguridad
 *.pth
 
