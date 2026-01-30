@@ -30,7 +30,7 @@ COLECCION = "SENTINEL-2"
 
 # Fechas
 DIAS = 40000 # x ultimos dias
-FECHA_FIN = date.today()
+FECHA_FIN = date.today() #- timedelta(days=25)
 FECHA_INICIO = FECHA_FIN - timedelta(days=DIAS)
 
 # Filtros
@@ -54,12 +54,11 @@ SOLAPAMIENTO_HR = 64
 INTERPOLACION_LR = cv2.INTER_CUBIC # Degradación bicúbica para el LR
 
 # Data Augmentation
-ROTACION_AUGMENTATION = True 
-ESCALAS_ZOOM = [1.0, 1.5, 2.0, 3, 4]
+ROTACION_AUGMENTATION = False#True
+ESCALAS_ZOOM = [32.0]#[1.0, 1.5, 2.0, 3, 4]
 
 # Normalización
-LOW_PERCENTILE = 1
-HIGH_PERCENTILE = 95
+VALOR_CORTE_SUPERIOR = 3000  # Valor a partir del cual todo es blanco (Max Reflectancia)
 
 
 # carga las credenciales desde local, para no leakear mis credenciales :)
@@ -82,30 +81,31 @@ def obtener_token(usuario, clave):
     r.raise_for_status()
     return r.json()["access_token"]
 
-# Intento evitar instanciar muchas veces la imagen porque ocupa mucha memoria
-def normalizar_percentiles(imagen, low_p, high_p):
+# Normaliza usando un valor tope fijo
+def normalizar_fijo(imagen, valor_corte):
     # NoData=0, lo ignoramos
     mask = imagen > 0
 
-    # Eliminar valores fuera de los percentiles
-    normalizado = np.clip(imagen[mask], low_p, high_p)
-    # Normalizar a [0-255]
-    normalizado = (((normalizado - low_p) / (high_p - low_p)) * 255).astype(np.uint8)
-    
+    # Todo lo que supere 3000 se queda en 3000
+    img_clipped = np.clip(imagen[mask], 0, valor_corte)
+
+    # Escalar a 0-255
+    # (Valor / 3000) * 255
+    normalizado = (img_clipped / valor_corte * 255).astype(np.uint8)
+
     salida = np.zeros_like(imagen, dtype=np.uint8)
     salida[mask] = normalizado
     return salida
 
-
 # Recibe el ZIP en memoria (BytesIO), extrae bandas, crea parches y los guarda
-def procesar_buffer_zip(buffer_zip, nombre_producto, contador_global):
+def procesar_buffer(buffer, nombre_producto, contador_global):
     print(f"   > Procesando: {nombre_producto}...")
     parches_guardados = 0
     
     # Usamos un directorio temporal para extraer SOLO las bandas necesarias
     with tempfile.TemporaryDirectory() as temp_dir:
         try:
-            with zipfile.ZipFile(buffer_zip) as zf:
+            with zipfile.ZipFile(buffer) as zf:
                 archivos_bandas = []
                 for name in zf.namelist():
                     # Buscamos resolucion 10m y bandas B02, B03, B04
@@ -133,48 +133,44 @@ def procesar_buffer_zip(buffer_zip, nombre_producto, contador_global):
             rgb_apilados_validos = np.concatenate([rojo[mascara_combinada], verde[mascara_combinada], azul[mascara_combinada]])
             
             if rgb_apilados_validos.size == 0:
-                print(f"  > ERROR: No se encontraron píxeles válidos. Saltando zip.")
+                print(f"  > ERROR: No se encontraron píxeles válidos. Saltando tile")
                 return 0
-
-            p_low, p_high = np.percentile(rgb_apilados_validos, (LOW_PERCENTILE, HIGH_PERCENTILE))
-
 
 
             # histograma
             # ---------------------------------------------------------
             try:
                 plt.figure(figsize=(10, 6))
+                plt.hist(rgb_apilados_validos[::100], bins=100, color='teal', alpha=0.7, label='Distribución Píxeles')
 
-                # Histograma
-                plt.hist(rgb_apilados_validos[::100], bins=100, color='teal', alpha=0.7, label='Distribución de Píxeles')
-
-                # Líneas verticales para los percentiles
-                plt.axvline(p_low, color='red', linestyle='--', linewidth=2, label=f'Corte Min ({LOW_PERCENTILE}%): {int(p_low)}')
-                plt.axvline(p_high, color='orange', linestyle='--', linewidth=2, label=f'Corte Max ({HIGH_PERCENTILE}%): {int(p_high)}')
+                # Línea roja fija en 3000
+                plt.axvline(VALOR_CORTE_SUPERIOR, color='red', linestyle='-', linewidth=2, label=f'Corte Fijo ({VALOR_CORTE_SUPERIOR})')
 
                 plt.title(f"Histograma RGB - {nombre_producto}")
                 plt.xlabel("Valor Reflectancia (Digital Number)")
-                plt.ylabel("Frecuencia (Log Scale opcional)")
-                # plt.yscale('log') # Descomenta si hay barras muy dispares
+                plt.ylabel("Frecuencia")
                 plt.legend()
                 plt.grid(True, alpha=0.3)
 
                 ruta_hist = os.path.join('temporal', f"{nombre_producto}_HIST.png")
                 plt.savefig(ruta_hist)
                 plt.close()
-                print(f"   > Histograma guardado con marcas.")
+                print(f"   > Histograma guardado.")
             except Exception as e:
                 print(f"   > Error generando histograma: {e}")
+
+            # Liberamos memoria del histograma
+            del rgb_apilados_validos, masks, mascara_combinada
             # ---------------------------------------------------------
 
                 
 
             del rgb_apilados_validos, masks, mascara_combinada
             
-            rojo = normalizar_percentiles(rojo, p_low, p_high)
-            verde = normalizar_percentiles(verde, p_low, p_high)
-            azul = normalizar_percentiles(azul, p_low, p_high)
-            
+            rojo = normalizar_fijo(rojo, VALOR_CORTE_SUPERIOR)
+            verde = normalizar_fijo(verde, VALOR_CORTE_SUPERIOR)
+            azul = normalizar_fijo(azul, VALOR_CORTE_SUPERIOR)
+
             # Crear imagen HR completa (H, W, 3)
             img_hr_full = np.stack([rojo, verde, azul], axis=-1)
             del rojo, verde, azul
@@ -193,68 +189,64 @@ def procesar_buffer_zip(buffer_zip, nombre_producto, contador_global):
                 print(f"   > No se pudo guardar el tile completo: {e}")
             # ---------------------------------------------------------
 
-            
+
             # Generar parches
             for zoom in ESCALAS_ZOOM:
                 print(f"  > Procesando zoom: {zoom}")
                 # Calculamos qué tamaño de trozo tenemos que cortar de la imagen original para que, al reducirlo, quede de 256x256
                 crop_size = int(TAMANO_PARCHE_HR * zoom)
-                
+
                 # Ajustamos el paso para que el solapamiento sea proporcional
                 paso = crop_size - int(SOLAPAMIENTO_HR * zoom)
                 if paso < 1: paso = 1
-                
+
                 for y in range(0, h_full - crop_size + 1, paso):
                     for x in range(0, w_full - crop_size + 1, paso):
-                        
+
                         # Recortar sobre la imagen original
                         patch_src = img_hr_full[y:y+crop_size, x:x+crop_size, :].copy()
-                        
+
                         if np.mean(patch_src) < 10: continue # Descartar parches oscuros
-                        
+
                         # Ajustar la resolucion de la imagen para que independientemente del zoom, sea 256x256
                         if crop_size != TAMANO_PARCHE_HR:
                             patch_hr = cv2.resize(patch_src, (TAMANO_PARCHE_HR, TAMANO_PARCHE_HR), interpolation=cv2.INTER_CUBIC)
                         else:
                             patch_hr = patch_src
-                            
+
                         patch_lr = cv2.resize(patch_hr, (TAMANO_PARCHE_LR, TAMANO_PARCHE_LR), interpolation=INTERPOLACION_LR)
-                        
+
                         # Rotaciones
                         rots = [0, 1, 2, 3] if ROTACION_AUGMENTATION else [0]
-                        
+
                         for k in rots:
                             hr_final = np.rot90(patch_hr, k)
                             lr_final = np.rot90(patch_lr, k)
-                            
+
                             # Formato: IDGlobal_Zoom_Rot.png
                             fname = f"{contador_global:08d}_z{int(zoom*10)}_r{k}.png"
-                            
+
                             Image.fromarray(hr_final).save(os.path.join(CARPETA_SALIDA_HR, fname))
                             Image.fromarray(lr_final).save(os.path.join(CARPETA_SALIDA_LR, fname))
-                        
+
                         contador_global += 1
             
             del img_hr_full
             return contador_global * len(rots)
             
         except Exception as e:
-            print(f"   > Error procesando zip: {e}")
+            print(f"   > Error procesando: {e}")
             return contador_global * len(rots)
 
-
+# Mueve aleatoriamente un porcentaje de imágenes de train a val.
 def generar_split_validacion():
-    """
-    Mueve aleatoriamente un porcentaje de imágenes de train a val.
-    """
     print(f"\n--- Generando set de validación ({PORCENTAJE_VALIDACION*100}%) ---")
 
-    # 1. Crear directorios de validación si no existen
+    # Crear directorios
     os.makedirs(CARPETA_VAL_HR, exist_ok=True)
     os.makedirs(CARPETA_VAL_LR, exist_ok=True)
 
-    # 2. Listar todas las imágenes generadas en HR
-    # (Asumimos que por cada HR existe su correspondiente LR con el mismo nombre)
+    # Listar todas las imágenes generadas en HR
     archivos_train = [f for f in os.listdir(CARPETA_SALIDA_HR) if f.endswith('.png')]
     total_imgs = len(archivos_train)
 
@@ -262,37 +254,29 @@ def generar_split_validacion():
         print("   > No hay imágenes para mover.")
         return
 
-    # 3. Calcular cuántas mover y seleccionarlas aleatoriamente
     num_a_mover = int(total_imgs * PORCENTAJE_VALIDACION)
     archivos_seleccionados = random.sample(archivos_train, num_a_mover)
 
-    print(f"   > Total generadas: {total_imgs}")
     print(f"   > Moviendo {num_a_mover} imágenes a carpetas de validación...")
 
-    # 4. Mover archivos
     movidos = 0
     for nombre_archivo in archivos_seleccionados:
-        try:
-            # Rutas Origen
-            src_hr = os.path.join(CARPETA_SALIDA_HR, nombre_archivo)
-            src_lr = os.path.join(CARPETA_SALIDA_LR, nombre_archivo)
+        # Rutas Origen
+        src_hr = os.path.join(CARPETA_SALIDA_HR, nombre_archivo)
+        src_lr = os.path.join(CARPETA_SALIDA_LR, nombre_archivo)
 
-            # Rutas Destino
-            dst_hr = os.path.join(CARPETA_VAL_HR, nombre_archivo)
-            dst_lr = os.path.join(CARPETA_VAL_LR, nombre_archivo)
+        # Rutas Destino
+        dst_hr = os.path.join(CARPETA_VAL_HR, nombre_archivo)
+        dst_lr = os.path.join(CARPETA_VAL_LR, nombre_archivo)
 
-            # Mover HR
-            shutil.move(src_hr, dst_hr)
+        # Mover HR
+        shutil.move(src_hr, dst_hr)
 
-            # Mover LR (Verificamos que exista para evitar errores)
-            if os.path.exists(src_lr):
-                shutil.move(src_lr, dst_lr)
+        # Mover LR
+        if os.path.exists(src_lr):
+            shutil.move(src_lr, dst_lr)
 
-            movidos += 1
-
-        except Exception as e:
-            print(f"Error moviendo {nombre_archivo}: {e}")
-
+        movidos += 1
     print(f"   > {movidos} pares de imágenes movidos a validación.")
 
 
@@ -312,7 +296,7 @@ if __name__ == "__main__":
     url = (f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products?"
            f"$filter=Collection/Name eq '{COLECCION}'"
            f" and OData.CSC.Intersects(area=geography'SRID=4326;{HUELLA_WKT}')"
-           f" and contains(Name,'MSIL2A')"
+           f" and contains(Name,'MSIL2A')" # filtro L2A
            f" and ContentDate/Start gt {FECHA_INICIO}T00:00:00.000Z"
            f" and ContentDate/Start lt {FECHA_FIN}T00:00:00.000Z"
            f" and Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value lt {MAX_NUBES})"
@@ -332,10 +316,7 @@ if __name__ == "__main__":
         print("No se encontraron imágenes con esos filtros.")
         exit()
         
-    # Filtro L2A 
-    # products = products[~products["Name"].str.contains("L1C")]
-    
-    
+
     print(f"Encontradas {len(products)} imágenes L2A")
     contador_global = 0
     session = requests.Session()
@@ -343,18 +324,19 @@ if __name__ == "__main__":
     retries = Retry(total=5, backoff_factor=1, status_forcelist=[408, 500, 502, 503, 504])
     session.mount('https://', HTTPAdapter(max_retries=retries))
 
-    try:
-        token = obtener_token(user, password)
-        session.headers.update({"Authorization": f"Bearer {token}"})
-        
-        for idx, row in products.iterrows():
+    for idx, row in products.iterrows():
+        try:
             tiempo_inicio_tile = time.time()
 
             prod_id = row['Id']
             prod_name = row['Name']
-            
+
+            # Renovar el token de sesion cada tile
+            token = obtener_token(user, password)
+            session.headers.update({"Authorization": f"Bearer {token}"})
+
+
             print(f"\n[{idx+1}/{len(products)}] Descargando: {prod_name} ...")
-            
             down_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({prod_id})/$value"
             
             r = session.get(down_url, allow_redirects=False)
@@ -362,50 +344,24 @@ if __name__ == "__main__":
                 down_url = r.headers['Location']
                 r = session.get(down_url, allow_redirects=False)
             
-            # delete=False para que no se borre al cerrar el bloque, lo borramos nosotros manualmente luego
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
-                tmp_path = tmp_file.name
-                try:
-                    # stream=True es vital. timeout=120 da 2 minutos de margen al servidor.
-                    with session.get(down_url, stream=True, verify=True, timeout=120) as r_stream:
-                        r_stream.raise_for_status()
-                        total_size = int(r_stream.headers.get('content-length', 0))
+            r_file = session.get(down_url, verify=True)
+            r_file.raise_for_status()
 
-                        for chunk in r_stream.iter_content(chunk_size=10240*10240): # Chunks de 10MB
-                            if chunk:
-                                tmp_file.write(chunk)
-
-                except Exception as e:
-                    print(f"   > Error CRÍTICO en descarga: {e}")
-                    tmp_file.close()
-                    if os.path.exists(tmp_path): os.remove(tmp_path)
-                    continue # Saltamos a la siguiente imagen si esta falla
-
-            # --- PROCESADO ---
+            # Convertir los bytes descargados en un archivo en memoria
+            buffer = io.BytesIO(r_file.content)
             contador_anterior = contador_global
+            contador_global = procesar_buffer(buffer, prod_name, contador_global)
 
-            try:
-                # Abrimos el archivo del disco en modo lectura binaria
-                with open(tmp_path, 'rb') as f_zip:
-                    contador_global = procesar_buffer_zip(f_zip, prod_name, contador_global)
-            except Exception as e:
-                print(f"   > Error procesando el ZIP: {e}")
-            finally:
-                # Limpieza: Borramos el archivo temporal de 1GB para no llenar el disco
-                if os.path.exists(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except:
-                        pass
+            buffer.close()
+            del buffer
 
             print(f"   > Generados {contador_global - contador_anterior} parches de esta imagen.")
-
             print(f"   > Tiempo total para esta imagen: {(time.time() - tiempo_inicio_tile)/60:.1f} minutos")
             print(f"   > Tiempo total hasta ahora: {(time.time() - tiempo_inicio_total)/60:.1f} minutos")
 
             
-    except Exception as e:
-        print(f"Error general: {e}")
+        except Exception as e:
+            print(f"Error general: {e}")
 
 
     print(f"Total parches generados: {contador_global}")
