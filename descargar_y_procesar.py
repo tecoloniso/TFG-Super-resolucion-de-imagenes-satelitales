@@ -1,7 +1,10 @@
+import matplotlib.pyplot as plt
 import io
 import os
 import shutil
 import random
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import tempfile
 import zipfile
 import requests
@@ -14,7 +17,7 @@ from shapely.geometry import shape
 from PIL import Image
 from pathlib import Path
 from datetime import date, timedelta
-from tqdm import tqdm
+import time
 
 
 ARCHIVO_CREDENCIALES = 'datasets/credentials.txt'
@@ -26,13 +29,13 @@ HUELLA_WKT = f'POLYGON(({BBOX_X[0]} {BBOX_X[1]}, {BBOX_X[2]} {BBOX_X[1]}, {BBOX_
 COLECCION = "SENTINEL-2"
 
 # Fechas
-DIAS = 2000 # x ultimos dias
+DIAS = 40000 # x ultimos dias
 FECHA_FIN = date.today()
 FECHA_INICIO = FECHA_FIN - timedelta(days=DIAS)
 
 # Filtros
 MAX_NUBES = 20      # % de nubes de las imagenes
-MAX_IMAGENES = 30    # Cuantas imagenes procesar
+MAX_IMAGENES = 20    # Cuantas imagenes procesar
 
 # Carpetas donde guardar los parches
 CARPETA_SALIDA_HR = 'datasets/Reg_X/train_HR'
@@ -55,8 +58,8 @@ ROTACION_AUGMENTATION = True
 ESCALAS_ZOOM = [1.0, 1.5, 2.0, 3, 4]
 
 # Normalización
-LOW_PERCENTILE = 2
-HIGH_PERCENTILE = 98
+LOW_PERCENTILE = 1
+HIGH_PERCENTILE = 95
 
 
 # carga las credenciales desde local, para no leakear mis credenciales :)
@@ -132,8 +135,40 @@ def procesar_buffer_zip(buffer_zip, nombre_producto, contador_global):
             if rgb_apilados_validos.size == 0:
                 print(f"  > ERROR: No se encontraron píxeles válidos. Saltando zip.")
                 return 0
-                
+
             p_low, p_high = np.percentile(rgb_apilados_validos, (LOW_PERCENTILE, HIGH_PERCENTILE))
+
+
+
+            # histograma
+            # ---------------------------------------------------------
+            try:
+                plt.figure(figsize=(10, 6))
+
+                # Histograma
+                plt.hist(rgb_apilados_validos[::100], bins=100, color='teal', alpha=0.7, label='Distribución de Píxeles')
+
+                # Líneas verticales para los percentiles
+                plt.axvline(p_low, color='red', linestyle='--', linewidth=2, label=f'Corte Min ({LOW_PERCENTILE}%): {int(p_low)}')
+                plt.axvline(p_high, color='orange', linestyle='--', linewidth=2, label=f'Corte Max ({HIGH_PERCENTILE}%): {int(p_high)}')
+
+                plt.title(f"Histograma RGB - {nombre_producto}")
+                plt.xlabel("Valor Reflectancia (Digital Number)")
+                plt.ylabel("Frecuencia (Log Scale opcional)")
+                # plt.yscale('log') # Descomenta si hay barras muy dispares
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+
+                ruta_hist = os.path.join('temporal', f"{nombre_producto}_HIST.png")
+                plt.savefig(ruta_hist)
+                plt.close()
+                print(f"   > Histograma guardado con marcas.")
+            except Exception as e:
+                print(f"   > Error generando histograma: {e}")
+            # ---------------------------------------------------------
+
+                
+
             del rgb_apilados_validos, masks, mascara_combinada
             
             rojo = normalizar_percentiles(rojo, p_low, p_high)
@@ -145,6 +180,19 @@ def procesar_buffer_zip(buffer_zip, nombre_producto, contador_global):
             del rojo, verde, azul
             
             h_full, w_full, _ = img_hr_full.shape
+
+
+            # guardar tile
+            # ---------------------------------------------------------
+            try:
+                ruta_full = os.path.join('temporal', f"{nombre_producto}_FULL.png")
+                print(f"   > Guardando Tile completo en: {ruta_full}")
+                # optimize=True ayuda a reducir el peso del PNG sin perder calidad visible
+                Image.fromarray(img_hr_full).save(ruta_full, optimize=True)
+            except Exception as e:
+                print(f"   > No se pudo guardar el tile completo: {e}")
+            # ---------------------------------------------------------
+
             
             # Generar parches
             for zoom in ESCALAS_ZOOM:
@@ -222,8 +270,8 @@ def generar_split_validacion():
     print(f"   > Moviendo {num_a_mover} imágenes a carpetas de validación...")
 
     # 4. Mover archivos
-    movidos_count = 0
-    for nombre_archivo in tqdm(archivos_seleccionados, desc="Moviendo a Val"):
+    movidos = 0
+    for nombre_archivo in archivos_seleccionados:
         try:
             # Rutas Origen
             src_hr = os.path.join(CARPETA_SALIDA_HR, nombre_archivo)
@@ -240,16 +288,18 @@ def generar_split_validacion():
             if os.path.exists(src_lr):
                 shutil.move(src_lr, dst_lr)
 
-            movidos_count += 1
+            movidos += 1
 
         except Exception as e:
             print(f"Error moviendo {nombre_archivo}: {e}")
 
-    print(f"   > ¡Hecho! {movidos_count} pares de imágenes movidos a validación.")
+    print(f"   > {movidos} pares de imágenes movidos a validación.")
 
 
 if __name__ == "__main__":
-    for d in [CARPETA_SALIDA_HR, CARPETA_SALIDA_LR]:
+    tiempo_inicio_total = time.time()
+
+    for d in [CARPETA_SALIDA_HR, CARPETA_SALIDA_LR, 'temporal']:
         if os.path.exists(d): shutil.rmtree(d)
         os.makedirs(d, exist_ok=True)
 
@@ -262,13 +312,17 @@ if __name__ == "__main__":
     url = (f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products?"
            f"$filter=Collection/Name eq '{COLECCION}'"
            f" and OData.CSC.Intersects(area=geography'SRID=4326;{HUELLA_WKT}')"
+           f" and contains(Name,'MSIL2A')"
            f" and ContentDate/Start gt {FECHA_INICIO}T00:00:00.000Z"
            f" and ContentDate/Start lt {FECHA_FIN}T00:00:00.000Z"
            f" and Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value lt {MAX_NUBES})"
            f"&$count=True&$top={MAX_IMAGENES}&$orderby=ContentDate/Start desc")
     
     try:
-        resp = requests.get(url).json()
+        #resp = requests.get(url).json()
+        resp = requests.get(url)
+        print(resp)
+        resp = resp.json()
         products = pd.DataFrame.from_dict(resp.get("value", []))
     except Exception as e:
         print(f"Error conectando con Copernicus: {e}")
@@ -279,18 +333,23 @@ if __name__ == "__main__":
         exit()
         
     # Filtro L2A 
-    products = products[~products["Name"].str.contains("L1C")]
+    # products = products[~products["Name"].str.contains("L1C")]
     
     
-    print(f"Se procesarán {len(products)} imágenes (descarga + procesado).")
+    print(f"Encontradas {len(products)} imágenes L2A")
     contador_global = 0
     session = requests.Session()
     
+    retries = Retry(total=5, backoff_factor=1, status_forcelist=[408, 500, 502, 503, 504])
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+
     try:
         token = obtener_token(user, password)
         session.headers.update({"Authorization": f"Bearer {token}"})
         
         for idx, row in products.iterrows():
+            tiempo_inicio_tile = time.time()
+
             prod_id = row['Id']
             prod_name = row['Name']
             
@@ -303,21 +362,47 @@ if __name__ == "__main__":
                 down_url = r.headers['Location']
                 r = session.get(down_url, allow_redirects=False)
             
-            
-            print("   > Iniciando petición HTTP (esperando respuesta completa)...")
-            r_file = session.get(down_url, verify=True)
-            r_file.raise_for_status()
-            
-            # io.BytesIO como buffer
-            buffer_zip = io.BytesIO(r_file.content)
-            
-            print("   > Descarga completada. Iniciando procesado...")
+            # delete=False para que no se borre al cerrar el bloque, lo borramos nosotros manualmente luego
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+                tmp_path = tmp_file.name
+                try:
+                    # stream=True es vital. timeout=120 da 2 minutos de margen al servidor.
+                    with session.get(down_url, stream=True, verify=True, timeout=120) as r_stream:
+                        r_stream.raise_for_status()
+                        total_size = int(r_stream.headers.get('content-length', 0))
+
+                        for chunk in r_stream.iter_content(chunk_size=10240*10240): # Chunks de 10MB
+                            if chunk:
+                                tmp_file.write(chunk)
+
+                except Exception as e:
+                    print(f"   > Error CRÍTICO en descarga: {e}")
+                    tmp_file.close()
+                    if os.path.exists(tmp_path): os.remove(tmp_path)
+                    continue # Saltamos a la siguiente imagen si esta falla
+
+            # --- PROCESADO ---
             contador_anterior = contador_global
-            contador_global = procesar_buffer_zip(buffer_zip, prod_name, contador_global)
-            
+
+            try:
+                # Abrimos el archivo del disco en modo lectura binaria
+                with open(tmp_path, 'rb') as f_zip:
+                    contador_global = procesar_buffer_zip(f_zip, prod_name, contador_global)
+            except Exception as e:
+                print(f"   > Error procesando el ZIP: {e}")
+            finally:
+                # Limpieza: Borramos el archivo temporal de 1GB para no llenar el disco
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except:
+                        pass
+
             print(f"   > Generados {contador_global - contador_anterior} parches de esta imagen.")
-            buffer_zip.close()
-            del buffer_zip
+
+            print(f"   > Tiempo total para esta imagen: {(time.time() - tiempo_inicio_tile)/60:.1f} minutos")
+            print(f"   > Tiempo total hasta ahora: {(time.time() - tiempo_inicio_total)/60:.1f} minutos")
+
             
     except Exception as e:
         print(f"Error general: {e}")
@@ -328,3 +413,5 @@ if __name__ == "__main__":
 
     if contador_global > 0:
         generar_split_validacion()
+
+    print(f"\nTIEMPO TOTAL DE EJECUCIÓN: {(time.time() - tiempo_inicio_total)/60:.2f} minutos")
