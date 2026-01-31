@@ -16,6 +16,8 @@ from utils.utils_dist import get_dist_info, init_dist
 from data.select_dataset import define_Dataset
 from models.select_model import define_Model
 
+from torch.utils.tensorboard import SummaryWriter
+
 
 '''
 # --------------------------------------------
@@ -160,6 +162,12 @@ def main(json_path='options/train_msrresnet_psnr.json'):
         logger.info(model.info_network())
         logger.info(model.info_params())
 
+    # ----------------------------------------
+    # initialize TensorBoard
+    # ----------------------------------------
+    if opt['rank'] == 0:
+        tb_logger = SummaryWriter(log_dir=opt['path']['log'])
+
     '''
     # ----------------------------------------
     # Step--4 (main training)
@@ -197,6 +205,10 @@ def main(json_path='options/train_msrresnet_psnr.json'):
                 message = '<epoch:{:3d}, iter:{:8,d}, lr:{:.3e}> '.format(epoch, current_step, model.current_learning_rate())
                 for k, v in logs.items():  # merge log information into message
                     message += '{:s}: {:.3e} '.format(k, v)
+                    # --- TensorBoard ---
+                    tb_logger.add_scalar(f'Train/{k}', v, current_step)
+                # --- TensorBoard LR ---
+                tb_logger.add_scalar('Train/lr', model.current_learning_rate(), current_step)
                 logger.info(message)
 
             # -------------------------------
@@ -253,6 +265,9 @@ def main(json_path='options/train_msrresnet_psnr.json'):
                         avg_psnr += current_psnr
 
                     avg_psnr = avg_psnr / idx
+
+                    # --- TensorBoard Test ---
+                    tb_logger.add_scalar('Test/Average_PSNR', avg_psnr, current_step)
 
                     # testing log
                     logger.info('<epoch:{:3d}, iter:{:8,d}, Average PSNR : {:<.2f}dB\n'.format(epoch, current_step, avg_psnr))
