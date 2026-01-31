@@ -253,14 +253,14 @@ def procesar_buffer(buffer, nombre_producto, contador_global):
                             Image.fromarray(hr_final).save(os.path.join(CARPETA_SALIDA_HR, fname))
                             Image.fromarray(lr_final).save(os.path.join(CARPETA_SALIDA_LR, fname))
 
-                        contador_global += 1
+                        contador_global += 4
             
             del img_hr_full
-            return contador_global * len(rots)
+            return contador_global
             
         except Exception as e:
             print(f"   > Error procesando: {e}")
-            return contador_global * len(rots)
+            return contador_global
 
 # Mueve aleatoriamente un porcentaje de imágenes de train a val.
 def generar_split_validacion():
