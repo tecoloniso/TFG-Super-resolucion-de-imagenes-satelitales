@@ -51,14 +51,14 @@ TAMANO_PARCHE_HR = 256
 TAMANO_PARCHE_LR = 64
 FACTOR_ESCALA = 4
 SOLAPAMIENTO_HR = 64
-INTERPOLACION_LR = cv2.INTER_CUBIC # Degradación bicúbica para el LR
 
 # Data Augmentation
-ROTACION_AUGMENTATION = False#True
-ESCALAS_ZOOM = [32.0]#[1.0, 1.5, 2.0, 3, 4]
+ROTACION_AUGMENTATION = True
+ESCALAS_ZOOM = [1.0, 1.5, 2.0, 3.0, 4.0]
 
 # Normalización
 VALOR_CORTE_SUPERIOR = 3000  # Valor a partir del cual todo es blanco (Max Reflectancia)
+PERCENTILE_MIN = 0.1 # Percentil minimo
 
 
 # carga las credenciales desde local, para no leakear mis credenciales :)
@@ -81,28 +81,53 @@ def obtener_token(usuario, clave):
     r.raise_for_status()
     return r.json()["access_token"]
 
-# Normaliza usando un valor tope fijo
-def normalizar_fijo(imagen, valor_corte):
+# Normaliza estirando el histograma min max
+def normalizar_rango_dinamico(imagen, valor_min, valor_max):
     # NoData=0, lo ignoramos
     mask = imagen > 0
 
-    # Todo lo que supere 3000 se queda en 3000
-    img_clipped = np.clip(imagen[mask], 0, valor_corte)
+    # Todo lo menor al mínimo se vuelve el mínimo, todo lo mayor al máximo se vuelve el máximo
+    img_clipped = np.clip(imagen[mask], valor_min, valor_max)
 
     # Escalar a 0-255
-    # (Valor / 3000) * 255
-    normalizado = (img_clipped / valor_corte * 255).astype(np.uint8)
+    # (Valor - Min) / (Max - Min) * 255
+    rango = valor_max - valor_min
+    if rango == 0: rango = 1 # Evitar división por cero
+
+    normalizado = ((img_clipped - valor_min) / rango * 255).astype(np.uint8)
 
     salida = np.zeros_like(imagen, dtype=np.uint8)
     salida[mask] = normalizado
     return salida
+
+# Degradación compleja: Blur -> Resize -> Ruido
+def degradar_realista(img_hr):
+    # BLUR (Desenfoque)
+    sigma = random.uniform(0.5, 1.5)
+    img_blur = cv2.GaussianBlur(img_hr, (5, 5), sigma)
+
+    # Resize (bicubica)
+    h, w, _ = img_blur.shape
+    new_h = h // FACTOR_ESCALA
+    new_w = w // FACTOR_ESCALA
+    img_lr = cv2.resize(img_blur, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
+    # Ruido
+    noise_level = random.uniform(2, 10)
+    noise = np.random.normal(0, noise_level, img_lr.shape).astype(np.float32)
+    img_lr_noisy = img_lr.astype(np.float32) + noise
+
+    # Clip para asegurar que seguimos en rango 0-255 y volver a uint8
+    img_lr_final = np.clip(img_lr_noisy, 0, 255).astype(np.uint8)
+
+    return img_lr_final
 
 # Recibe el ZIP en memoria (BytesIO), extrae bandas, crea parches y los guarda
 def procesar_buffer(buffer, nombre_producto, contador_global):
     print(f"   > Procesando: {nombre_producto}...")
     parches_guardados = 0
     
-    # Usamos un directorio temporal para extraer SOLO las bandas necesarias
+    # Usamos un directorio temporal para extraer solo las bandas necesarias
     with tempfile.TemporaryDirectory() as temp_dir:
         try:
             with zipfile.ZipFile(buffer) as zf:
@@ -136,6 +161,7 @@ def procesar_buffer(buffer, nombre_producto, contador_global):
                 print(f"  > ERROR: No se encontraron píxeles válidos. Saltando tile")
                 return 0
 
+            valor_minimo_suelo = np.percentile(rgb_apilados_validos, PERCENTILE_MIN)
 
             # histograma
             # ---------------------------------------------------------
@@ -143,8 +169,11 @@ def procesar_buffer(buffer, nombre_producto, contador_global):
                 plt.figure(figsize=(10, 6))
                 plt.hist(rgb_apilados_validos[::100], bins=100, color='teal', alpha=0.7, label='Distribución Píxeles')
 
-                # Línea roja fija en 3000
-                plt.axvline(VALOR_CORTE_SUPERIOR, color='red', linestyle='-', linewidth=2, label=f'Corte Fijo ({VALOR_CORTE_SUPERIOR})')
+                # Línea ROJA corte fijo VALOR_CORTE_SUPERIOR
+                plt.axvline(VALOR_CORTE_SUPERIOR, color='red', linestyle='-', linewidth=2, label=f'Max Fijo ({VALOR_CORTE_SUPERIOR})')
+
+                # Línea AZUL el PERCENTILE_MIN del tile
+                plt.axvline(valor_minimo_suelo, color='blue', linestyle='-', linewidth=2, label=f'Min ({int(valor_minimo_suelo)})')
 
                 plt.title(f"Histograma RGB - {nombre_producto}")
                 plt.xlabel("Valor Reflectancia (Digital Number)")
@@ -155,21 +184,17 @@ def procesar_buffer(buffer, nombre_producto, contador_global):
                 ruta_hist = os.path.join('temporal', f"{nombre_producto}_HIST.png")
                 plt.savefig(ruta_hist)
                 plt.close()
-                print(f"   > Histograma guardado.")
+                print(f"   > Histograma guardado (Min: {int(valor_minimo_suelo)}).")
             except Exception as e:
                 print(f"   > Error generando histograma: {e}")
-
-            # Liberamos memoria del histograma
-            del rgb_apilados_validos, masks, mascara_combinada
             # ---------------------------------------------------------
 
-                
 
             del rgb_apilados_validos, masks, mascara_combinada
             
-            rojo = normalizar_fijo(rojo, VALOR_CORTE_SUPERIOR)
-            verde = normalizar_fijo(verde, VALOR_CORTE_SUPERIOR)
-            azul = normalizar_fijo(azul, VALOR_CORTE_SUPERIOR)
+            rojo = normalizar_rango_dinamico(rojo, valor_minimo_suelo, VALOR_CORTE_SUPERIOR)
+            verde = normalizar_rango_dinamico(verde, valor_minimo_suelo, VALOR_CORTE_SUPERIOR)
+            azul = normalizar_rango_dinamico(azul, valor_minimo_suelo, VALOR_CORTE_SUPERIOR)
 
             # Crear imagen HR completa (H, W, 3)
             img_hr_full = np.stack([rojo, verde, azul], axis=-1)
@@ -183,7 +208,6 @@ def procesar_buffer(buffer, nombre_producto, contador_global):
             try:
                 ruta_full = os.path.join('temporal', f"{nombre_producto}_FULL.png")
                 print(f"   > Guardando Tile completo en: {ruta_full}")
-                # optimize=True ayuda a reducir el peso del PNG sin perder calidad visible
                 Image.fromarray(img_hr_full).save(ruta_full, optimize=True)
             except Exception as e:
                 print(f"   > No se pudo guardar el tile completo: {e}")
@@ -214,7 +238,7 @@ def procesar_buffer(buffer, nombre_producto, contador_global):
                         else:
                             patch_hr = patch_src
 
-                        patch_lr = cv2.resize(patch_hr, (TAMANO_PARCHE_LR, TAMANO_PARCHE_LR), interpolation=INTERPOLACION_LR)
+                        patch_lr = degradar_realista(patch_hr)
 
                         # Rotaciones
                         rots = [0, 1, 2, 3] if ROTACION_AUGMENTATION else [0]
