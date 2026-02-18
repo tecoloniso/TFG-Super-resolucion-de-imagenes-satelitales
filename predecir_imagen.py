@@ -8,55 +8,34 @@ from KAIR.models.network_swinir import SwinIR as net
 
 
 # Configura y carga el modelo SwinIR en memoria
-# Detecta automáticamente si es un modelo tipo GAN o PSNR para ajustar la arquitectura
-def definir_modelo(ruta_modelo, escala=4, dispositivo='cuda'):
+# Detecta si es un modelo tipo GAN o PSNR para ajustar la arquitectura
+def definir_modelo(ruta_modelo, escala=4, es_realsr=True, dispositivo='cuda'):
 
     print(f"   > Cargando pesos desde: {ruta_modelo}")
-    # 'map_location' ayuda a evitar errores si se guardó en GPU y se carga en CPU
     checkpoint = torch.load(ruta_modelo, map_location=lambda storage, loc: storage)
-    
-    clave_parametros = None
-    tipo_upsampler = ''
 
-    # nearest+conv
-    if 'params_ema' in checkpoint.keys():
-        clave_parametros = 'params_ema'
-        print("   > Detectado modelo RealSR (usando clave 'params_ema')")
-        tipo_upsampler = 'nearest+conv' 
-        
-    # pixelshuffle
-    elif 'params' in checkpoint.keys():
-        clave_parametros = 'params'
-        print("   > Detectado modelo Clásico (usando clave 'params')")
-        tipo_upsampler = 'pixelshuffle'
-        
-    else:
-        print("   > Detectado modelo sin claves (formato directo)")
-        tipo_upsampler = 'pixelshuffle' # Asumimos por defecto el clásico
-
-    # Si el nombre del archivo sugiere RealSR o GAN, forzamos
-    # el upsampler correcto, ya que 'pixelshuffle' fallara por dimensiones
-    if "003_realSR" in ruta_modelo or "GAN" in ruta_modelo:
+    if es_realsr or "realSR" in ruta_modelo or "GAN" in ruta_modelo:
          tipo_upsampler = 'nearest+conv'
-    
-    print(f"   > Configurando arquitectura con upsampler: '{tipo_upsampler}'")
-    
-    # Definimos la estructura de la red neuronal.
-    # Estos parametros (depths, embed_dim, num_heads) definen el tamaño "SwinIR-M" (Medium)
-    # Deben coincidir con los usados durante el entrenamiento
+         print("   > Configuración: RealSR (nearest+conv)")
+    else:
+         tipo_upsampler = 'pixelshuffle'
+         print("   > Configuración: Clásico (pixelshuffle)")
+
+    # Definimos la red con el upsampler decidido
     modelo = net(upscale=escala, in_chans=3, img_size=64, window_size=8,
-                img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, 
-                num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2, 
+                img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180,
+                num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2,
                 upsampler=tipo_upsampler, resi_connection='1conv')
-    
-    if clave_parametros:
-        modelo.load_state_dict(checkpoint[clave_parametros], strict=True)
+
+    # Carga de pesos
+    if 'params_ema' in checkpoint:
+        modelo.load_state_dict(checkpoint['params_ema'], strict=True)
+    elif 'params' in checkpoint:
+        modelo.load_state_dict(checkpoint['params'], strict=True)
     else:
         modelo.load_state_dict(checkpoint, strict=True)
-        
-    # modo evaluación (congela capas como BatchNorm o Dropout)
+
     modelo.eval()
-    # Movemos el modelo a la tarjeta gráfica (o CPU)
     modelo = modelo.to(dispositivo)
     return modelo
 
@@ -101,16 +80,22 @@ def predecir_por_bloques(img_baja_res, modelo, escala, tamano_bloque, solapamien
 
 def main():
     parser = argparse.ArgumentParser(description="Script de Predicción SwinIR para TFG")
-    parser.add_argument('--input', type=str, required=True, help='Ruta a la imagen de entrada (Baja Resolución)')
-    parser.add_argument('--output', type=str, required=True, help='Ruta donde guardar la imagen resultante (Alta Resolución)')
-    parser.add_argument('--model', type=str, required=True, help='Ruta al archivo .pth con los pesos del modelo')
-    parser.add_argument('--tile', type=int, default=None, help='Tamaño del bloque de procesamiento (ej. 400). Usar para evitar errores de memoria en GPU.')
+    parser.add_argument('--input', type=str, required=True, help='Ruta a la imagen de entrada')
+    parser.add_argument('--output', type=str, required=True, help='Ruta donde guardar el resultado')
+    parser.add_argument('--model', type=str, required=True, help='Ruta al archivo .pth')
+    parser.add_argument('--tile', type=int, default=None, help='Tamaño del bloque')
+
+    # --- CAMBIO 2: Nuevo argumento para desactivar RealSR si fuera necesario ---
+    parser.add_argument('--no_realsr', action='store_true', help='Usar si el modelo es antiguo (pixelshuffle)')
     args = parser.parse_args()
 
     dispositivo = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"--- Iniciando Predicción en {dispositivo} ---")
 
-    modelo = definir_modelo(args.model, escala=4, dispositivo=dispositivo)
+    # Por defecto asumimos que SÍ es RealSR (tu caso), salvo que digas lo contrario
+    es_realsr_activado = not args.no_realsr
+
+    modelo = definir_modelo(args.model, escala=4, es_realsr=es_realsr_activado, dispositivo=dispositivo)
 
     print(f"Leyendo imagen: {args.input}")
     # OpenCV lee en formato BGR y valores 0-255. Convertimos a float32 [0, 1]
