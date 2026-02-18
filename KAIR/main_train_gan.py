@@ -16,6 +16,8 @@ from utils.utils_dist import get_dist_info, init_dist
 from data.select_dataset import define_Dataset
 from models.select_model import define_Model
 
+from torch.utils.tensorboard import SummaryWriter
+
 
 '''
 # --------------------------------------------
@@ -61,13 +63,18 @@ def main(json_path='options/train_msrresnet_gan.json'):
     init_iter_G, init_path_G = option.find_last_checkpoint(opt['path']['models'], net_type='G')
     init_iter_D, init_path_D = option.find_last_checkpoint(opt['path']['models'], net_type='D')
     init_iter_E, init_path_E = option.find_last_checkpoint(opt['path']['models'], net_type='E')
-    opt['path']['pretrained_netG'] = init_path_G
-    opt['path']['pretrained_netD'] = init_path_D
-    opt['path']['pretrained_netE'] = init_path_E
+    #opt['path']['pretrained_netG'] = init_path_G
+    #opt['path']['pretrained_netD'] = init_path_D
+    #opt['path']['pretrained_netE'] = init_path_E
     init_iter_optimizerG, init_path_optimizerG = option.find_last_checkpoint(opt['path']['models'], net_type='optimizerG')
     init_iter_optimizerD, init_path_optimizerD = option.find_last_checkpoint(opt['path']['models'], net_type='optimizerD')
     opt['path']['pretrained_optimizerG'] = init_path_optimizerG
     opt['path']['pretrained_optimizerD'] = init_path_optimizerD
+
+    opt['path']['pretrained_netG'] = init_path_G if init_path_G else opt['path']['pretrained_netG']
+    opt['path']['pretrained_netD'] = init_path_D if init_path_D else opt['path']['pretrained_netD']
+    opt['path']['pretrained_netE'] = init_path_E if init_path_E else opt['path']['pretrained_netE']
+
     current_step = max(init_iter_G, init_iter_D, init_iter_E, init_iter_optimizerG, init_iter_optimizerD)
 
     # opt['path']['pretrained_netG'] = ''
@@ -161,6 +168,9 @@ def main(json_path='options/train_msrresnet_gan.json'):
         logger.info(model.info_network())
         logger.info(model.info_params())
 
+    if opt['rank'] == 0:
+        tb_logger = SummaryWriter(log_dir=opt['path']['log'])
+
     '''
     # ----------------------------------------
     # Step--4 (main training)
@@ -198,6 +208,12 @@ def main(json_path='options/train_msrresnet_gan.json'):
                 message = '<epoch:{:3d}, iter:{:8,d}, lr:{:.3e}> '.format(epoch, current_step, model.current_learning_rate())
                 for k, v in logs.items():  # merge log information into message
                     message += '{:s}: {:.3e} '.format(k, v)
+
+                    if 'loss' in k or 'D' in k or 'G' in k:
+                         tb_logger.add_scalar(f'Train/{k}', v, current_step)
+
+                # Learning Rate
+                tb_logger.add_scalar('Train/lr', model.current_learning_rate(), current_step)
                 logger.info(message)
 
             # -------------------------------
@@ -233,8 +249,9 @@ def main(json_path='options/train_msrresnet_gan.json'):
                     # -----------------------
                     # save estimated image E
                     # -----------------------
-                    save_img_path = os.path.join(img_dir, '{:s}_{:d}.png'.format(img_name, current_step))
-                    util.imsave(E_img, save_img_path)
+                    if idx <= 5:
+                        save_img_path = os.path.join(img_dir, '{:s}_{:d}.png'.format(img_name, current_step))
+                        util.imsave(E_img, save_img_path)
 
                     # -----------------------
                     # calculate PSNR
@@ -246,6 +263,8 @@ def main(json_path='options/train_msrresnet_gan.json'):
                     avg_psnr += current_psnr
 
                 avg_psnr = avg_psnr / idx
+
+                tb_logger.add_scalar('Test/Average_PSNR', avg_psnr, current_step)
 
                 # testing log
                 logger.info('<epoch:{:3d}, iter:{:8,d}, Average PSNR : {:<.2f}dB\n'.format(epoch, current_step, avg_psnr))
