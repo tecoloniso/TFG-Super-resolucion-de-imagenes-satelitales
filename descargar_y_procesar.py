@@ -230,7 +230,8 @@ def procesar_buffer(buffer, nombre_producto, contador_global):
                         # Recortar sobre la imagen original
                         patch_src = img_hr_full[y:y+crop_size, x:x+crop_size, :].copy()
 
-                        if np.mean(patch_src) < 10: continue # Descartar parches oscuros
+                        if np.mean(patch_src) < 15: continue # Descartar parches muy oscuros
+                        if np.mean(patch_src) > 240: continue # Descartar parches muy blancos
 
                         # Ajustar la resolucion de la imagen para que independientemente del zoom, sea 256x256
                         if crop_size != TAMANO_PARCHE_HR:
