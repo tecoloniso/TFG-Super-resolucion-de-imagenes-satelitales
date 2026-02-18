@@ -1,0 +1,111 @@
+{
+  "task": "SwinIR_TFG_Satelite_RealSR_x4_GAN",
+  "model": "gan",
+  "dist": false,
+  "gpu_ids": [0],
+  "scale": 4,
+  "n_channels": 3,
+
+  "path": {
+    "root": "superresolution",
+    "experiments_root": "experiments/SwinIR_TFG_Satelite_RealSR_x4_GAN",
+
+    "pretrained_netG": "superresolution/SwinIR_TFG_Satelite_RealSR_x4/models/405000_G.pth",
+    "pretrained_netD": null,
+    "pretrained_netE": "superresolution/SwinIR_TFG_Satelite_RealSR_x4/models/405000_E.pth"
+  },
+
+  "datasets": {
+    "train": {
+      "name": "Reg_X_train",
+      "dataset_type": "sr",
+      "dataroot_H": "../datasets/Reg_X/train_HR",
+      "dataroot_L": "../datasets/Reg_X/train_LR",
+      "H_size": 256,
+      "dataloader_shuffle": true,
+      "dataloader_num_workers": 8,
+      "dataloader_batch_size": 12
+    },
+    "test": {
+      "name": "Reg_X_val",
+      "dataset_type": "sr",
+      "dataroot_H": "../datasets/Reg_X/val_HR",
+      "dataroot_L": "../datasets/Reg_X/val_LR"
+    }
+  },
+
+  "netG": {
+    "net_type": "swinir",
+    "upscale": 4,
+    "in_chans": 3,
+    "img_size": 64,
+    "window_size": 8,
+    "img_range": 1.0,
+    "depths": [6, 6, 6, 6, 6, 6],
+    "embed_dim": 180,
+    "num_heads": [6, 6, 6, 6, 6, 6],
+    "mlp_ratio": 2,
+    "upsampler": "nearest+conv",
+    "resi_connection": "1conv",
+    "init_type": "default"
+  },
+
+  "netD": {
+    "net_type": "discriminator_unet",
+    "in_nc": 3,
+    "base_nc": 64,
+    "n_layers": 3,
+    "norm_type": "spectral",
+    "init_type": "orthogonal",
+    "init_bn_type": "uniform",
+    "init_gain": 0.2
+  },
+
+  "train": {
+    "G_lossfn_type": "l1",
+    "G_lossfn_weight": 1e-2,
+
+    "F_lossfn_type": "l1",
+    "F_lossfn_weight": 1.0,
+    "F_feature_layer": 34,
+    "F_weights": 1.0,
+    "F_use_input_norm": true,
+    "F_use_range_norm": false,
+
+    "gan_type": "ragan",
+    "G_gan_type": "ragan",
+    "G_gan_weight": 1e-2,
+
+    "D_lossfn_weight": 1.0,
+
+    "E_decay": 0.999,
+
+    "G_optimizer_type": "adam",
+    "G_optimizer_lr": 1e-4,
+    "G_optimizer_wd": 0,
+    "G_optimizer_reuse": true,
+
+    "D_optimizer_type": "adam",
+    "D_optimizer_lr": 1e-4,
+    "D_optimizer_wd": 0,
+    "D_optimizer_reuse": false,
+
+    "G_scheduler_type": "MultiStepLR",
+    "G_scheduler_milestones": [100000, 150000, 175000, 190000],
+    "G_scheduler_gamma": 0.5,
+
+    "D_scheduler_type": "MultiStepLR",
+    "D_scheduler_milestones": [100000, 150000, 175000, 190000],
+    "D_scheduler_gamma": 0.5,
+
+    "G_param_strict": true,
+    "E_param_strict": true,
+    "D_param_strict": true,
+
+    "n_iter": 200000,
+
+    "checkpoint_test": 10000,
+    "checkpoint_save": 10000,
+    "checkpoint_print": 200
+  }
+}
