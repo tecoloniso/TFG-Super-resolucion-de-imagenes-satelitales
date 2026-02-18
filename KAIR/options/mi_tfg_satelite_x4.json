@@ -67,7 +67,7 @@
     "G_param_strict": true, 
     "E_param_strict": true,
 
-    "n_iter": 300000,
+    "n_iter": 405000,
     
     "checkpoint_test": 15000,
     "checkpoint_save": 5000,
