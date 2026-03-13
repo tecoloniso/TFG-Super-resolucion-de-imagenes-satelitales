@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore")
+
 import argparse
 import cv2
 import numpy as np
@@ -47,6 +50,11 @@ def predecir_por_bloques(img_baja_res, modelo, escala, tamano_bloque, solapamien
     b, c, h, w = img_baja_res.size()
     tile = min(tamano_bloque, h, w)
     
+    if tile <= solapamiento:
+        print(f"   > Imagen muy pequeña ({h}x{w}). Ignorando Tiling.")
+        with torch.no_grad():
+            return modelo(img_baja_res)
+
     # Swin Transformer funciona con ventanas de atención de 8x8
     assert tile % 8 == 0, "El tamaño del tile debe ser múltiplo de 8"
     
