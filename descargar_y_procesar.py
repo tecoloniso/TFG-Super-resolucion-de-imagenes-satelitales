@@ -41,10 +41,13 @@ MAX_IMAGENES = 20    # Cuantas imagenes procesar
 CARPETA_SALIDA_HR = 'datasets/Reg_X/train_HR'
 CARPETA_SALIDA_LR = 'datasets/Reg_X/train_LR'
 
-# Configuración Validación
+# Configuración Validación y Test
 PORCENTAJE_VALIDACION = 0.2  # % de las imágenes irán a validación
+PORCENTAJE_TEST = 0.1        # % de las imágenes irán a test
 CARPETA_VAL_HR = 'datasets/Reg_X/val_HR'
 CARPETA_VAL_LR = 'datasets/Reg_X/val_LR'
+CARPETA_TEST_HR = 'datasets/Reg_X/test_HR'
+CARPETA_TEST_LR = 'datasets/Reg_X/test_LR'
 
 # Configurar parches (fijos)
 TAMANO_PARCHE_HR = 256
@@ -263,15 +266,15 @@ def procesar_buffer(buffer, nombre_producto, contador_global):
             print(f"   > Error procesando: {e}")
             return contador_global
 
-# Mueve aleatoriamente un porcentaje de imágenes de train a val.
-def generar_split_validacion():
-    print(f"\n--- Generando set de validación ({PORCENTAJE_VALIDACION*100}%) ---")
+# Mueve aleatoriamente porcentajes de imágenes de train a val y test simultáneamente.
+def generar_splits_datasets():
+    porcentaje_total = PORCENTAJE_VALIDACION + PORCENTAJE_TEST
+    print(f"\n--- Generando sets de Validación ({PORCENTAJE_VALIDACION*100}%) y Test ({PORCENTAJE_TEST*100}%) ---")
 
-    # Crear directorios
-    os.makedirs(CARPETA_VAL_HR, exist_ok=True)
-    os.makedirs(CARPETA_VAL_LR, exist_ok=True)
+    for d in [CARPETA_VAL_HR, CARPETA_VAL_LR, CARPETA_TEST_HR, CARPETA_TEST_LR]:
+        os.makedirs(d, exist_ok=True)
 
-    # Listar todas las imágenes generadas en HR
+    # Listar todas las imágenes generadas inicialmente en HR (Train)
     archivos_train = [f for f in os.listdir(CARPETA_SALIDA_HR) if f.endswith('.png')]
     total_imgs = len(archivos_train)
 
@@ -279,31 +282,39 @@ def generar_split_validacion():
         print("   > No hay imágenes para mover.")
         return
 
-    num_a_mover = int(total_imgs * PORCENTAJE_VALIDACION)
-    archivos_seleccionados = random.sample(archivos_train, num_a_mover)
+    num_val = int(total_imgs * PORCENTAJE_VALIDACION)
+    num_test = int(total_imgs * PORCENTAJE_TEST)
+    total_a_mover = num_val + num_test
 
-    print(f"   > Moviendo {num_a_mover} imágenes a carpetas de validación...")
+    # Selección conjunta para garantizar que NO hay solapamiento entre Val y Test
+    archivos_seleccionados = random.sample(archivos_train, total_a_mover)
 
-    movidos = 0
-    for nombre_archivo in archivos_seleccionados:
-        # Rutas Origen
-        src_hr = os.path.join(CARPETA_SALIDA_HR, nombre_archivo)
-        src_lr = os.path.join(CARPETA_SALIDA_LR, nombre_archivo)
+    archivos_val = archivos_seleccionados[:num_val]
+    archivos_test = archivos_seleccionados[num_val:]
 
-        # Rutas Destino
-        dst_hr = os.path.join(CARPETA_VAL_HR, nombre_archivo)
-        dst_lr = os.path.join(CARPETA_VAL_LR, nombre_archivo)
+    print(f"   > Total parches: {total_imgs}. Extrayendo {num_val} para VAL y {num_test} para TEST...")
 
-        # Mover HR
-        shutil.move(src_hr, dst_hr)
+    # Función interna para mover archivos
+    def mover_archivos(lista_archivos, carpeta_destino_hr, carpeta_destino_lr):
+        movidos = 0
+        for nombre_archivo in lista_archivos:
+            src_hr = os.path.join(CARPETA_SALIDA_HR, nombre_archivo)
+            src_lr = os.path.join(CARPETA_SALIDA_LR, nombre_archivo)
+            dst_hr = os.path.join(carpeta_destino_hr, nombre_archivo)
+            dst_lr = os.path.join(carpeta_destino_lr, nombre_archivo)
 
-        # Mover LR
-        if os.path.exists(src_lr):
-            shutil.move(src_lr, dst_lr)
+            shutil.move(src_hr, dst_hr)
+            if os.path.exists(src_lr):
+                shutil.move(src_lr, dst_lr)
+            movidos += 1
+        return movidos
 
-        movidos += 1
-    print(f"   > {movidos} pares de imágenes movidos a validación.")
+    movidos_val = mover_archivos(archivos_val, CARPETA_VAL_HR, CARPETA_VAL_LR)
+    movidos_test = mover_archivos(archivos_test, CARPETA_TEST_HR, CARPETA_TEST_LR)
 
+    print(f"   > {movidos_val} pares movidos a Validación.")
+    print(f"   > {movidos_test} pares movidos a Test.")
+    print(f"   > {total_imgs - (movidos_val + movidos_test)} pares restantes en Train.")
 
 if __name__ == "__main__":
     tiempo_inicio_total = time.time()
@@ -393,6 +404,6 @@ if __name__ == "__main__":
     print(f"Guardados en: {CARPETA_SALIDA_HR}")
 
     if contador_global > 0:
-        generar_split_validacion()
+        generar_splits_datasets()
 
     print(f"\nTIEMPO TOTAL DE EJECUCIÓN: {(time.time() - tiempo_inicio_total)/60:.2f} minutos")
