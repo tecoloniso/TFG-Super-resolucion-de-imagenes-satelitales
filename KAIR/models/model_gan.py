@@ -277,6 +277,7 @@ class ModelGAN(ModelBase):
             if self.opt_train['F_lossfn_weight'] > 0:
                 self.log_dict['F_loss'] = F_loss.item()
             self.log_dict['D_loss'] = D_loss.item()
+            self.log_dict['G_total_loss'] = loss_G_total.item()
 
         #self.log_dict['l_d_real'] = l_d_real.item()
         #self.log_dict['l_d_fake'] = l_d_fake.item()
