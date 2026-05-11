@@ -175,8 +175,6 @@ dependencies:
   - lz4-c=1.9.4
   - mapclassify=2.8.1
   - markupsafe=3.0.2
-  - matplotlib=3.3.2
-  - matplotlib-base=3.3.2
   - mesalib=25.1.5
   - mkl=2023.1.0
   - mkl-service=2.4.0
@@ -203,7 +201,6 @@ dependencies:
   - pandas=2.2.3
   - pcre=8.45
   - pcre2=10.42
-  - pillow=8.4.0
   - pip=25.3
   - pixman=0.46.4
   - poppler=22.04.0
@@ -297,11 +294,15 @@ dependencies:
       - importlib-metadata==8.7.1
       - lazy-loader==0.4
       - lmdb==1.7.5
+      - lpips==0.1.4
       - markdown==3.9
+      - matplotlib==3.9.4
       - opencv-python==4.13.0.90
+      - pillow==11.3.0
       - protobuf==6.33.5
       - safetensors==0.7.0
       - scikit-image==0.24.0
+      - seaborn==0.13.2
       - shellingham==1.5.4
       - sympy==1.13.1
       - tensorboard==2.20.0
