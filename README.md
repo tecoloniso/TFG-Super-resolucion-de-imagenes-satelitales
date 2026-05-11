@@ -6,3 +6,7 @@ Durante la fase de experimentación, se ponen a prueba y se comparan diferentes 
 
 <img width="5662" height="8400" alt="mosaico_global1" src="https://github.com/user-attachments/assets/d479ff73-551f-4838-91ae-78aeb9c90b26" />
 <img width="5239" height="8400" alt="mosaico_global2" src="https://github.com/user-attachments/assets/4e5b7644-64dc-4c80-8cc9-ca4b9884705e" />
+
+
+para duplicar el entorno conda en una maquina linux: 
+conda env create -f tfg_swinir_linux.yml
