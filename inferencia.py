@@ -39,6 +39,14 @@ def procesar_clasico(img, metodo, escala):
         h, w = int(img.shape[0] // escala), int(img.shape[1] // escala)
         return cv2.resize(img, (w, h), interpolation=cv2.INTER_CUBIC)
 
+    elif metodo == 'nearest_up':
+        h, w = int(img.shape[0] * escala), int(img.shape[1] * escala)
+        return cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
+
+    elif metodo == 'nearest_down':
+        h, w = int(img.shape[0] // escala), int(img.shape[1] // escala)
+        return cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
+
     elif metodo == 'degradar':
         return degradar_realista(img, escala)
 
@@ -134,7 +142,7 @@ def main():
     parser = argparse.ArgumentParser(description="Pipeline Unificado de Procesamiento de Imágenes TFG")
     parser.add_argument('--input', type=str, required=True, help='Ruta imagen entrada')
     parser.add_argument('--output', type=str, required=True, help='Ruta imagen salida')
-    parser.add_argument('--metodo', type=str, required=True, choices=['swinir', 'bicubico_up', 'bicubico_down', 'degradar'], help='Motor a utilizar')
+    parser.add_argument('--metodo', type=str, required=True, choices=['swinir', 'bicubico_up', 'bicubico_down', 'nearest_up', 'nearest_down', 'degradar'], help='Motor a utilizar')
     parser.add_argument('--scale', type=int, default=4, help='Factor de escala')
 
     # Argumentos exclusivos de SwinIR
@@ -157,7 +165,10 @@ def main():
     else:
         img_out = procesar_clasico(img_in, args.metodo, args.scale)
 
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    directorio_salida = os.path.dirname(args.output)
+    if directorio_salida:
+        os.makedirs(directorio_salida, exist_ok=True)
+
     cv2.imwrite(args.output, img_out)
     print(f"¡Éxito! Guardado en: {args.output}")
 
